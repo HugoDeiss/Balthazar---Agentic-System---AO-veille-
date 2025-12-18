@@ -19,12 +19,18 @@ src/mastra/
 ├── index.ts              # Configuration principale Mastra
 ├── agents/               # Agents IA
 │   ├── tender-monitor-agent.ts    # Agent de veille
-│   └── tender-analyst-agent.ts    # Agent d'analyse
+│   ├── tender-analyst-agent.ts    # Agent d'analyse
+│   ├── boamp-agent.ts             # 🆕 Agent d'analyse BOAMP
+│   ├── boamp-agent.example.ts     # Exemples d'utilisation
+│   ├── README.md                  # Documentation des agents
+│   ├── INTEGRATION.md             # Guide d'intégration
+│   └── index.ts                   # Export des agents
 ├── tools/                # Outils des agents
-│   ├── tender-search-tool.ts      # Recherche d'AO
-│   └── tender-analysis-tool.ts    # Analyse d'AO
+│   ├── boamp-fetcher.ts           # 🆕 Récupération BOAMP
+│   └── index.ts                   # Export des outils
 └── workflows/            # Workflows orchestrés
-    └── tender-processing-workflow.ts  # Pipeline complet
+    ├── ao-veille.ts               # 🆕 Pipeline complet BOAMP
+    └── index.ts                   # Export des workflows
 ```
 
 ## 🚀 Installation
@@ -79,6 +85,21 @@ Agent d'analyse qui évalue chaque opportunité :
 - Recommandation GO / NO GO / À APPROFONDIR
 - Identification des risques et points forts
 
+### 🆕 BOAMP Agent
+Agent spécialisé dans l'analyse des appels d'offres BOAMP :
+- **Analyse sémantique** : Évalue la pertinence d'un AO (score 0-10)
+- **Analyse de faisabilité** : Vérifie les critères financiers, techniques et de timing
+- **Analyse de compétitivité** : Évalue les chances de succès et fournit des conseils stratégiques
+- **Recommandation finale** : GO / NO-GO / MAYBE avec justifications détaillées
+
+**Fonctionnalités avancées** :
+- Détection automatique des correctifs et renouvellements
+- Prise en compte du type de procédure (ouvert, restreint, dialogue compétitif)
+- Identification des blockers et points de vigilance
+- Analyse des critères d'attribution (prix vs qualité technique)
+
+**Documentation complète** : `src/mastra/agents/README.md`
+
 ## 🔧 Outils
 
 ### tender-search
@@ -96,28 +117,54 @@ Analyse détaillée d'un appel d'offres :
 - Estimation de l'effort
 - Identification des risques
 
-## 🔄 Workflow
+### 🆕 boamp-fetcher
+Récupération des appels d'offres depuis l'API BOAMP :
+- `since`: Date de début (format YYYY-MM-DD)
+- `typeMarche`: Type de marché (SERVICES, FOURNITURES, TRAVAUX)
+- `limit`: Nombre maximum d'AO à récupérer (1-100)
+- `departement`: Code département (optionnel)
 
-Le workflow `tender-processing-workflow` orchestre le pipeline complet :
+**Fonctionnalités** :
+- Filtrage automatique des AO annulés et attribués
+- Extraction des données enrichies (critères, procédure, acheteur)
+- Normalisation des données pour l'analyse
+- Support des champs avancés (correctifs, renouvellements)
 
-1. **Recherche** → Collecte des AO selon les critères
-2. **Analyse** → Évaluation de chaque opportunité
-3. **Rapport** → Génération du rapport de synthèse
+## 🔄 Workflows
+
+### 🆕 ao-veille-workflow (BOAMP)
+
+Pipeline complet d'analyse des appels d'offres BOAMP :
+
+1. **Collecte + Pré-qualification** → Fetch BOAMP + filtrage basique (budget, deadline, région)
+2. **Matching Mots-clés** → Filtrage par mots-clés client (seuil 30%)
+3. **Analyse Sémantique** (LLM) → Évaluation de la pertinence (score ≥ 6)
+4. **Analyse Faisabilité** (LLM) → Vérification des critères (financier, technique, timing)
+5. **Scoring + Priorisation** → Calcul du score global et priorisation (HIGH/MEDIUM/LOW)
+6. **Sauvegarde** → Upsert dans Supabase avec enrichissement
+
+**Optimisation des coûts** :
+- Étapes 1, 2, 5, 6 : Rules-based (gratuit)
+- Étapes 3, 4 : LLM uniquement sur les AO pré-qualifiés
 
 ### Utilisation via API
 
 ```bash
-# Déclencher le workflow
-curl -X POST http://localhost:4111/api/workflows/tenderProcessingWorkflow/start \
+# Déclencher le workflow BOAMP
+curl -X POST http://localhost:4111/workflows/ao-veille-workflow/execute \
   -H "Content-Type: application/json" \
   -d '{
-    "inputData": {
-      "keywords": ["conseil", "stratégie", "transformation digitale"],
-      "category": "services",
-      "minBudget": 50000,
-      "region": "Île-de-France"
-    }
+    "clientId": "client-001",
+    "since": "2025-12-01"
   }'
+
+# Réponse attendue
+{
+  "saved": 15,
+  "high": 5,
+  "medium": 7,
+  "low": 3
+}
 ```
 
 ## 🧪 Test avec Studio
@@ -148,6 +195,9 @@ Analyse cet appel d'offres : Mission d'audit organisationnel pour la Région Bre
 | Variable | Description | Requis |
 |----------|-------------|--------|
 | `OPENAI_API_KEY` | Clé API OpenAI | ✅ |
+| `ANTHROPIC_API_KEY` | Clé API Anthropic (pour boampAgent) | ✅ |
+| `SUPABASE_URL` | URL de votre projet Supabase | ✅ |
+| `SUPABASE_SERVICE_KEY` | Clé service Supabase | ✅ |
 | `PORT` | Port du serveur (défaut: 4111) | ❌ |
 
 ### Personnalisation des agents
@@ -157,13 +207,32 @@ Les instructions des agents peuvent être modifiées dans les fichiers correspon
 - Les domaines d'expertise
 - Les seuils de recommandation
 
-## 🔜 Évolutions prévues
+## ✅ Fonctionnalités Implémentées
 
-- [ ] Intégration avec les API des plateformes de marchés publics (BOAMP, JOUE, etc.)
-- [ ] Stockage des analyses en base de données
-- [ ] Notifications automatiques pour les nouvelles opportunités
-- [ ] Interface web dédiée
+- [x] Intégration avec l'API BOAMP (boamp-fetcher tool)
+- [x] Agent d'analyse BOAMP spécialisé (boampAgent)
+- [x] Workflow complet de veille et analyse (ao-veille-workflow)
+- [x] Stockage des analyses en Supabase
+- [x] Analyse sémantique, faisabilité et compétitivité
+- [x] Scoring et priorisation automatiques
+
+## 🔜 Évolutions Prévues
+
+- [ ] Système de cache pour éviter les ré-analyses
+- [ ] Notifications automatiques pour les AO prioritaires
+- [ ] Interface web dédiée pour la consultation
 - [ ] Export des rapports en PDF
+- [ ] Support d'autres sources (PLACE, AWS, JOUE)
+- [ ] Génération automatique de réponses aux AO
+- [ ] Tests unitaires et d'intégration
+- [ ] Métriques de performance et coût LLM
+
+## 📚 Documentation Complète
+
+- **Agent BOAMP** : `src/mastra/agents/README.md`
+- **Intégration** : `src/mastra/agents/INTEGRATION.md`
+- **Exemples** : `src/mastra/agents/boamp-agent.example.ts`
+- **Résumé** : `BOAMP_AGENT_SUMMARY.md`
 
 ## 📄 Licence
 

@@ -6,4 +6,5 @@
 
 export { tenderMonitorAgent } from "./tender-monitor-agent";
 export { tenderAnalystAgent } from "./tender-analyst-agent";
+export { boampAgent } from "./boamp-agent";
 
