@@ -233,46 +233,50 @@ const semanticAnalysisStep = createStep({
   execute: async ({ inputData, mastra }) => {
     const { keywordMatched, client } = inputData;
     
-    const balthazarAgent = mastra?.getAgent('balthazar');
-    if (!balthazarAgent) {
-      throw new Error('Agent balthazar not found');
+    // 🆕 Utilisation de l'agent spécialisé boampSemanticAnalyzer
+    const semanticAgent = mastra?.getAgent('boampSemanticAnalyzer');
+    if (!semanticAgent) {
+      throw new Error('Agent boampSemanticAnalyzer not found');
     }
     
     const semanticAnalyzed = await Promise.all(
       keywordMatched.map(async (ao) => {
-        // Context procédure pour le LLM
-        const procedureContext = `
-          Type de procédure: ${ao.raw_json?.procedure_libelle || 'Non spécifié'}
-          // AO ouvert = accessible à tous
-          // AO restreint = sur présélection
-          // Dialogue compétitif = négociation
-        `;
-        
-        const analysis = await balthazarAgent.generate([
+        const procedureContext = ao.raw_json?.procedure_libelle 
+          ? `Type de procédure: ${ao.raw_json.procedure_libelle}
+             // Procédure ouverte = accessible à tous (+3 points)
+             // Procédure restreinte = sur présélection (neutre)
+             // Dialogue compétitif = nécessite plus de ressources (-1 point)
+             // MPS = procédure allégée (+2 points)`
+          : 'Type de procédure non spécifié';
+
+        const analysis = await semanticAgent.generate([
           {
             role: 'user',
             content: `
-              Profil client:
-              ${JSON.stringify(client.profile, null, 2)}
-              
-              Appel d'offres:
-              - Titre: ${ao.title}
-              - Description: ${ao.description}
-              - Mots-clés: ${ao.keywords?.join(', ')}
-              - Acheteur: ${ao.acheteur}
-              
-              Context procédure:
-              ${procedureContext}
-              
-              Question: Sur une échelle de 0 à 10, quelle est la pertinence de cet AO pour ce client ?
-              Prends en compte le type de procédure (un AO ouvert est plus accessible qu'un AO restreint).
-              
-              Réponds UNIQUEMENT en JSON:
-              {
-                "score": <number 0-10>,
-                "reason": "<justification en 1-2 phrases>"
-              }
-            `
+Profil client:
+- Nom: ${client.name}
+- Mots-clés métier: ${client.keywords.join(', ')}
+- Type de marché: ${client.preferences.typeMarche}
+- Description: ${JSON.stringify(client.profile, null, 2)}
+
+Appel d'offres:
+- Titre: ${ao.title}
+- Description: ${ao.description || 'Non fournie'}
+- Mots-clés: ${ao.keywords?.join(', ') || 'Aucun'}
+- Acheteur: ${ao.acheteur || 'Non spécifié'}
+- Type de marché: ${ao.type_marche || 'Non spécifié'}
+
+${procedureContext}
+
+Question: Sur une échelle de 0 à 10, quelle est la pertinence de cet AO pour ce client ?
+Prends en compte le type de procédure dans ton évaluation.
+
+Réponds UNIQUEMENT en JSON:
+{
+  "score": <number 0-10>,
+  "reason": "<justification en 1-2 phrases>"
+}
+            `.trim()
           }
         ]);
         
@@ -290,7 +294,7 @@ const semanticAnalysisStep = createStep({
     // Garde seulement score ≥ 6
     const relevant = semanticAnalyzed.filter(ao => ao.semanticScore >= 6);
     
-    console.log(`✅ Analyse sémantique: ${relevant.length}/${keywordMatched.length} AO`);
+    console.log(`✅ Analyse sémantique (boampSemanticAnalyzer): ${relevant.length}/${keywordMatched.length} AO`);
     
     return { relevant, client };
   }
@@ -330,14 +334,18 @@ const feasibilityAnalysisStep = createStep({
   execute: async ({ inputData, mastra }) => {
     const { relevant, client } = inputData;
     
-    const balthazarAgent = mastra?.getAgent('balthazar');
-    if (!balthazarAgent) {
-      throw new Error('Agent balthazar not found');
+    // 🆕 Utilisation de l'agent spécialisé boampFeasibilityAnalyzer
+    const feasibilityAgent = mastra?.getAgent('boampFeasibilityAnalyzer');
+    if (!feasibilityAgent) {
+      throw new Error('Agent boampFeasibilityAnalyzer not found');
     }
     
     const feasibilityAnalyzed = await Promise.all(
       relevant.map(async (ao) => {
-        // Parse les critères depuis le JSON "donnees" (gestion d'erreur robuste)
+        // Calcul des jours restants
+        const daysRemaining = getDaysRemaining(ao.deadline || '');
+        
+        // Parse les critères depuis le JSON "donnees"
         let criteres = null;
         try {
           if (ao.raw_json?.donnees) {
@@ -354,48 +362,50 @@ const feasibilityAnalysisStep = createStep({
         const warnings: string[] = [];
         let additionalContext = '';
         
-        // Vérifier si l'AO a été modifié (correctif publié)
         if (ao.raw_json?.annonce_lie) {
           warnings.push("⚠️ Cet AO a fait l'objet d'un correctif");
           additionalContext += `\nAnnonce liée (correctif): ${ao.raw_json.annonce_lie}`;
         }
         
-        // Identifier les renouvellements de marché
         if (ao.raw_json?.annonces_anterieures) {
           additionalContext += '\nRenouvellement d\'un marché existant - peut être plus facile à gagner si on connaît l\'historique';
           warnings.push("ℹ️ Renouvellement de marché existant");
         }
         
-        const analysis = await balthazarAgent.generate([
+        const analysis = await feasibilityAgent.generate([
           {
             role: 'user',
             content: `
-              Profil client:
-              - CA annuel: ${client.financial.revenue}€
-              - Effectif: ${client.financial.employees} personnes
-              - Années d'expérience: ${client.financial.yearsInBusiness}
-              - Références similaires: ${client.technical.references} projets
-              
-              Critères AO:
-              ${JSON.stringify(criteres, null, 2)}
-              
-              Délai restant: ${getDaysRemaining(ao.deadline || '')} jours
-              ${additionalContext}
-              
-              Questions:
-              1. Le client respecte-t-il les critères financiers ?
-              2. Le client respecte-t-il les critères techniques ?
-              3. Le délai est-il réaliste pour préparer une réponse ?
-              
-              Réponds UNIQUEMENT en JSON:
-              {
-                "financial": <boolean>,
-                "technical": <boolean>,
-                "timing": <boolean>,
-                "blockers": [<liste des blockers si applicable>],
-                "confidence": <"high"|"medium"|"low">
-              }
-            `
+Profil client:
+- Nom: ${client.name}
+- CA annuel: ${client.financial.revenue}€
+- Effectif: ${client.financial.employees} personnes
+- Années d'expérience: ${client.financial.yearsInBusiness}
+- Références similaires: ${client.technical.references} projets
+
+Appel d'offres:
+- Titre: ${ao.title}
+- Budget max: ${ao.budget_max ? `${ao.budget_max}€` : 'Non spécifié'}
+- Délai restant: ${daysRemaining} jours
+
+Critères de participation (extraits du BOAMP):
+${JSON.stringify(criteres, null, 2)}
+${additionalContext}
+
+Questions:
+1. Le client respecte-t-il les critères financiers (CA minimum, garanties) ?
+2. Le client respecte-t-il les critères techniques (références, certifications, effectif) ?
+3. Le délai est-il réaliste pour préparer une réponse de qualité ?
+
+Réponds UNIQUEMENT en JSON:
+{
+  "financial": <boolean>,
+  "technical": <boolean>,
+  "timing": <boolean>,
+  "blockers": [<liste des blockers si applicable>],
+  "confidence": <"high"|"medium"|"low">
+}
+            `.trim()
           }
         ]);
         
@@ -406,6 +416,7 @@ const feasibilityAnalysisStep = createStep({
           feasibility,
           isFeasible: feasibility.financial && feasibility.technical && feasibility.timing,
           warnings,
+          daysRemaining,
           hasCorrectif: !!ao.raw_json?.annonce_lie,
           isRenewal: !!ao.raw_json?.annonces_anterieures
         };
@@ -414,7 +425,7 @@ const feasibilityAnalysisStep = createStep({
     
     const feasible = feasibilityAnalyzed.filter(ao => ao.isFeasible);
     
-    console.log(`✅ Analyse faisabilité: ${feasible.length}/${relevant.length} AO`);
+    console.log(`✅ Analyse faisabilité (boampFeasibilityAnalyzer): ${feasible.length}/${relevant.length} AO`);
     
     return { feasible, client };
   }

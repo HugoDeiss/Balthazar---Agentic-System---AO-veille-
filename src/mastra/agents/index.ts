@@ -4,7 +4,7 @@
  * This module exports all agents used in the tender monitoring system.
  */
 
-export { tenderMonitorAgent } from "./tender-monitor-agent";
-export { tenderAnalystAgent } from "./tender-analyst-agent";
-export { boampAgent } from "./boamp-agent";
+// Agents spécialisés pour l'analyse BOAMP
+export { boampSemanticAnalyzer } from "./boamp-semantic-analyzer";
+export { boampFeasibilityAnalyzer } from "./boamp-feasibility-analyzer";
 

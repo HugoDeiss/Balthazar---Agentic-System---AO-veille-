@@ -1,7 +1,10 @@
 import { Mastra } from "@mastra/core/mastra";
 
 // Import agents
-import { tenderMonitorAgent, tenderAnalystAgent, boampAgent } from "./agents";
+import { 
+  boampSemanticAnalyzer,
+  boampFeasibilityAnalyzer
+} from "./agents";
 
 // Import workflows
 import { aoVeilleWorkflow } from "./workflows";
@@ -20,20 +23,17 @@ import { aoVeilleWorkflow } from "./workflows";
  * - Workflow-based processing pipeline
  * 
  * Agents:
- * - tenderMonitorAgent: Monitors and searches for tender opportunities
- * - tenderAnalystAgent: Analyzes tenders and provides recommendations
- * - boampAgent: Specialized agent for analyzing BOAMP tender opportunities
+ * - boampSemanticAnalyzer: Semantic analysis of BOAMP tenders (Step 2b) - uses GPT-4o-mini
+ * - boampFeasibilityAnalyzer: Feasibility analysis of BOAMP tenders (Step 3) - uses GPT-4o
  * 
  * Workflows:
  * - aoVeilleWorkflow: Complete pipeline from BOAMP fetch to analysis and storage
  */
 export const mastra = new Mastra({
   agents: {
-    tenderMonitorAgent,
-    tenderAnalystAgent,
-    boampAgent,
-    // Alias pour compatibilité avec le workflow ao-veille.ts
-    balthazar: boampAgent,
+    // Agents spécialisés pour l'analyse BOAMP
+    boampSemanticAnalyzer,
+    boampFeasibilityAnalyzer,
   },
   workflows: {
     aoVeilleWorkflow,
