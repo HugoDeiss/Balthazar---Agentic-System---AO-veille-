@@ -2,6 +2,12 @@ import { createWorkflow, createStep } from '@mastra/core/workflows';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { boampFetcherTool } from '../tools/boamp-fetcher';
+import {
+  isRectification,
+  findOriginalAO,
+  detectSubstantialChanges,
+  formatChangesForEmail
+} from './rectificatif-utils';
 
 // ──────────────────────────────────────────────────
 // SUPABASE CLIENT
@@ -96,13 +102,13 @@ const aoSchema = z.object({
 });
 
 // ──────────────────────────────────────────────────
-// STEP 1: COLLECTE + PRÉ-QUALIFICATION (gratuit)
+// STEP 1: COLLECTE (gratuit, filtrage structurel API)
 // ──────────────────────────────────────────────────
 const fetchAndPrequalifyStep = createStep({
   id: 'fetch-and-prequalify',
   inputSchema: z.object({
     clientId: z.string(),
-    since: z.string()
+    since: z.string().optional()
   }),
   outputSchema: z.object({
     prequalified: z.array(aoSchema),
@@ -111,12 +117,12 @@ const fetchAndPrequalifyStep = createStep({
   execute: async ({ inputData, runtimeContext }) => {
     const client = await getClient(inputData.clientId);
     
-    // 1️⃣ Fetch BOAMP
+    // 1️⃣ Fetch BOAMP (filtrage structurel côté API)
     const boampData = await boampFetcherTool.execute!({
       context: {
-        since: inputData.since,
-        typeMarche: client.preferences.typeMarche,
-        limit: 100
+        since: inputData.since, // Optionnel, default = veille
+        typeMarche: client.preferences.typeMarche
+        // limit est maintenant par défaut à 500 dans le tool
       },
       runtimeContext
     }) as {
@@ -127,52 +133,235 @@ const fetchAndPrequalifyStep = createStep({
       records: any[];
     };
     
-    // 2️⃣ Pré-qualification (rules-based)
-    const prequalified = boampData.records.filter((ao: any) => {
-      return (
-        // Éviter les AO annulés
-        ao.etat !== 'AVIS_ANNULE' &&
-        
-        // Vérifier pas d'attribution (sécurité)
-        ao.titulaire === null &&
-        
-        // Budget
-        (ao.budget_max || 0) >= client.criteria.minBudget &&
-        
-        // Deadline
-        new Date(ao.deadline) > addDays(new Date(), 7) &&
-        
-        // Région (optionnel)
-        (!client.criteria.regions || 
-        client.criteria.regions.includes(ao.region))
-      );
-    });
+    console.log(`📥 BOAMP Fetch: ${boampData.records.length} AO récupérés`);
+    console.log(`📊 Total disponible: ${boampData.total_count}`);
+    console.log(`📅 Date cible: ${boampData.query.since}`);
     
-    console.log(`✅ Pré-qualification: ${prequalified.length}/${boampData.records.length} AO`);
+    // 2️⃣ PASSTHROUGH : Tous les AO passent (filtrage métier = IA)
+    const prequalified = boampData.records;
+    
+    console.log(`✅ Collecte: ${prequalified.length} AO transmis à l'analyse`);
     
     return { prequalified, client };
   }
 });
 
 // ──────────────────────────────────────────────────
-// STEP 2a: MATCHING MOTS-CLÉS (gratuit)
+// STEP 1b: GESTION DES ANNULATIONS (gratuit)
 // ──────────────────────────────────────────────────
-const keywordMatchingStep = createStep({
-  id: 'keyword-matching',
+const handleCancellationsStep = createStep({
+  id: 'handle-cancellations',
   inputSchema: z.object({
     prequalified: z.array(aoSchema),
     client: clientSchema
   }),
   outputSchema: z.object({
-    keywordMatched: z.array(aoSchema.extend({
-      keywordScore: z.number(),
-      matchedKeywords: z.array(z.string())
-    })),
+    activeAOs: z.array(aoSchema),
+    cancelledCount: z.number(),
     client: clientSchema
   }),
   execute: async ({ inputData }) => {
     const { prequalified, client } = inputData;
+    const activeAOs: any[] = [];
+    let cancelledCount = 0;
     
+    console.log(`🚫 Traitement des annulations sur ${prequalified.length} AO...`);
+    
+    for (const ao of prequalified) {
+      if (ao.etat === 'AVIS_ANNULE') {
+        cancelledCount++;
+        console.log(`❌ AO annulé détecté: ${ao.title} (${ao.source_id})`);
+        
+        // Mise à jour DB : marquer comme annulé
+        try {
+          const { error } = await supabase
+            .from('appels_offres')
+            .update({
+              etat: 'AVIS_ANNULE',
+              status: 'cancelled',
+              updated_at: new Date().toISOString()
+            })
+            .eq('source_id', ao.source_id);
+          
+          if (error) {
+            console.error(`⚠️ Erreur MAJ annulation pour ${ao.source_id}:`, error);
+          } else {
+            console.log(`✅ AO ${ao.source_id} marqué comme annulé en DB`);
+          }
+        } catch (err) {
+          console.error(`⚠️ Exception MAJ annulation:`, err);
+        }
+        
+        // Ne pas transmettre à l'analyse IA
+        continue;
+      }
+      
+      // AO actif : transmettre au step suivant
+      activeAOs.push(ao);
+    }
+    
+    console.log(`✅ Annulations: ${cancelledCount} traitées, ${activeAOs.length} AO actifs transmis`);
+    
+    return { 
+      activeAOs, 
+      cancelledCount,
+      client 
+    };
+  }
+});
+
+// ──────────────────────────────────────────────────
+// STEP 1c: DÉTECTION DES RECTIFICATIFS (gratuit)
+// ──────────────────────────────────────────────────
+const detectRectificationStep = createStep({
+  id: 'detect-rectification',
+  inputSchema: z.object({
+    activeAOs: z.array(aoSchema),
+    client: clientSchema
+  }),
+  outputSchema: z.object({
+    toAnalyze: z.array(aoSchema.extend({
+      _isRectification: z.boolean().optional(),
+      _originalAO: z.any().optional(),
+      _changes: z.any().optional()
+    })),
+    rectificationsMineurs: z.number(),
+    rectificationsSubstantiels: z.number(),
+    client: clientSchema
+  }),
+  execute: async ({ inputData }) => {
+    const { activeAOs, client } = inputData;
+    const toAnalyze: any[] = [];
+    let rectificationsMineurs = 0;
+    let rectificationsSubstantiels = 0;
+    
+    console.log(`🔍 Détection des rectificatifs sur ${activeAOs.length} AO...`);
+    
+    for (const ao of activeAOs) {
+      // ────────────────────────────────────────────────────────────
+      // 1. Vérifier si c'est un rectificatif
+      // ────────────────────────────────────────────────────────────
+      if (isRectification(ao)) {
+        console.log(`📝 Rectificatif détecté: ${ao.title}`);
+        
+        // ────────────────────────────────────────────────────────────
+        // 2. Retrouver l'AO original
+        // ────────────────────────────────────────────────────────────
+        const originalAO = await findOriginalAO(ao);
+        
+        if (originalAO) {
+          console.log(`🔗 AO original trouvé (ID: ${originalAO.id})`);
+          
+          // ────────────────────────────────────────────────────────────
+          // 3. Détecter les changements substantiels
+          // ────────────────────────────────────────────────────────────
+          const changeResult = detectSubstantialChanges(originalAO, ao);
+          
+          if (changeResult.isSubstantial) {
+            // ═══════════════════════════════════════════════════════════
+            // RECTIFICATIF SUBSTANTIEL → RE-ANALYSE NÉCESSAIRE
+            // ═══════════════════════════════════════════════════════════
+            console.log(`🔥 Rectificatif SUBSTANTIEL → Re-analyse requise`);
+            rectificationsSubstantiels++;
+            
+            // Marquer l'ancien AO comme rectifié
+            await supabase
+              .from('appels_offres')
+              .update({
+                is_rectified: true,
+                rectification_date: new Date().toISOString()
+              })
+              .eq('id', originalAO.id);
+            
+            // Ajouter à la liste pour re-analyse
+            toAnalyze.push({
+              ...ao,
+              _isRectification: true,
+              _originalAO: originalAO,
+              _changes: changeResult
+            });
+            
+          } else {
+            // ═══════════════════════════════════════════════════════════
+            // RECTIFICATIF MINEUR → SIMPLE UPDATE
+            // ═══════════════════════════════════════════════════════════
+            console.log(`✅ Rectificatif mineur → Simple mise à jour`);
+            rectificationsMineurs++;
+            
+            // Mettre à jour les champs modifiés (deadline, etc.)
+            await supabase
+              .from('appels_offres')
+              .update({
+                deadline: ao.deadline,
+                raw_json: ao.raw_json,
+                rectification_date: new Date().toISOString(),
+                rectification_count: (originalAO.rectification_count || 0) + 1,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', originalAO.id);
+            
+            // Ne pas ajouter à la liste d'analyse (déjà traité)
+          }
+          
+        } else {
+          // ═══════════════════════════════════════════════════════════
+          // AO ORIGINAL INTROUVABLE → TRAITER COMME NOUVEAU
+          // ═══════════════════════════════════════════════════════════
+          console.log(`⚠️ AO original introuvable → Traiter comme nouveau AO`);
+          toAnalyze.push(ao);
+        }
+        
+      } else {
+        // ═══════════════════════════════════════════════════════════
+        // AO STANDARD (pas un rectificatif)
+        // ═══════════════════════════════════════════════════════════
+        toAnalyze.push(ao);
+      }
+    }
+    
+    console.log(`📊 Rectificatifs: ${rectificationsMineurs} mineurs, ${rectificationsSubstantiels} substantiels`);
+    console.log(`✅ ${toAnalyze.length} AO à analyser (nouveaux + rectificatifs substantiels)`);
+    
+    return {
+      toAnalyze,
+      rectificationsMineurs,
+      rectificationsSubstantiels,
+      client
+    };
+  }
+});
+
+// ──────────────────────────────────────────────────
+// STEP 2a: PRÉ-SCORING MOTS-CLÉS (gratuit, non bloquant)
+// ──────────────────────────────────────────────────
+const keywordMatchingStep = createStep({
+  id: 'keyword-matching',
+  inputSchema: z.object({
+    toAnalyze: z.array(aoSchema.extend({
+      _isRectification: z.boolean().optional(),
+      _originalAO: z.any().optional(),
+      _changes: z.any().optional()
+    })),
+    rectificationsMineurs: z.number(),
+    rectificationsSubstantiels: z.number(),
+    client: clientSchema
+  }),
+  outputSchema: z.object({
+    keywordMatched: z.array(aoSchema.extend({
+      keywordScore: z.number(),
+      matchedKeywords: z.array(z.string()),
+      keywordSignals: z.record(z.boolean()).optional(),
+      _isRectification: z.boolean().optional(),
+      _originalAO: z.any().optional(),
+      _changes: z.any().optional()
+    })),
+    client: clientSchema
+  }),
+  execute: async ({ inputData }) => {
+    const { toAnalyze: prequalified, client } = inputData;
+    
+    // 🎯 NOUVEAU : Pré-score NON BLOQUANT
+    // Ne rejette JAMAIS un AO, produit seulement des signaux pour l'IA
     const keywordMatched = prequalified.map(ao => {
       const aoKeywords = [
         ...(ao.keywords || []),
@@ -181,29 +370,43 @@ const keywordMatchingStep = createStep({
       ].join(' ');
       
       // Compte combien de keywords client matchent
-      const matchCount = client.keywords.filter(kw => 
+      const matchedKeywords = client.keywords.filter(kw => 
         aoKeywords.includes(kw.toLowerCase())
-      ).length;
-      
+      );
+      const matchCount = matchedKeywords.length;
       const keywordScore = matchCount / client.keywords.length;
       
+      // 🆕 Signaux faibles : détection de concepts clés
+      const keywordSignals: Record<string, boolean> = {
+        strategy: /stratégie|stratégique/i.test(aoKeywords),
+        transformation: /transformation|digitale|numérique/i.test(aoKeywords),
+        innovation: /innovation|innovant/i.test(aoKeywords),
+        management: /management|pilotage|gestion/i.test(aoKeywords),
+        performance: /performance|efficacité|optimisation/i.test(aoKeywords),
+        conseil: /conseil|consulting|accompagnement/i.test(aoKeywords),
+        audit: /audit|diagnostic|évaluation/i.test(aoKeywords),
+        conduite_changement: /conduite.{0,5}changement|change.{0,5}management/i.test(aoKeywords)
+      };
+      
       // Analyse des critères d'attribution pour scorer la compétitivité
-      // Ex: "60% qualité technique, 40% prix"
       const criteres = ao.raw_json?.criteres || null;
       
       return {
         ...ao,
         keywordScore,
-        matchedKeywords: client.keywords.filter(kw => 
-          aoKeywords.includes(kw.toLowerCase())
-        ),
-        criteresAttribution: criteres
+        matchedKeywords,
+        keywordSignals,
+        criteresAttribution: criteres,
+        // Préserver les métadonnées de rectificatif
+        _isRectification: ao._isRectification,
+        _originalAO: ao._originalAO,
+        _changes: ao._changes
       };
     })
-    .filter(ao => ao.keywordScore >= 0.3) // Seuil 30%
+    // 🆕 PLUS DE FILTRE : tous les AO passent
     .sort((a, b) => b.keywordScore - a.keywordScore);
     
-    console.log(`✅ Keyword matching: ${keywordMatched.length}/${prequalified.length} AO`);
+    console.log(`✅ Keyword matching: ${keywordMatched.length}/${prequalified.length} AO (tous transmis avec pré-score)`);
     
     return { keywordMatched, client };
   }
@@ -258,6 +461,8 @@ Profil client:
 - Mots-clés métier: ${client.keywords.join(', ')}
 - Type de marché: ${client.preferences.typeMarche}
 - Description: ${JSON.stringify(client.profile, null, 2)}
+- Budget minimum: ${client.criteria.minBudget}€
+- Régions cibles: ${client.criteria.regions?.join(', ') || 'Toutes régions'}
 
 Appel d'offres:
 - Titre: ${ao.title}
@@ -265,16 +470,26 @@ Appel d'offres:
 - Mots-clés: ${ao.keywords?.join(', ') || 'Aucun'}
 - Acheteur: ${ao.acheteur || 'Non spécifié'}
 - Type de marché: ${ao.type_marche || 'Non spécifié'}
+- Budget estimé: ${ao.budget_max ? `${ao.budget_max}€` : 'Non spécifié'}
+- Région: ${ao.region || 'Non spécifiée'}
+- Pré-score mots-clés: ${ao.keywordScore?.toFixed(2) || 'N/A'}
+- Signaux détectés: ${ao.keywordSignals ? Object.entries(ao.keywordSignals).filter(([_, v]) => v).map(([k]) => k).join(', ') || 'Aucun' : 'N/A'}
 
 ${procedureContext}
 
 Question: Sur une échelle de 0 à 10, quelle est la pertinence de cet AO pour ce client ?
-Prends en compte le type de procédure dans ton évaluation.
+
+Critères d'évaluation:
+1. Adéquation métier (secteur, expertise, mots-clés)
+2. Budget compatible avec les capacités du client
+3. Localisation géographique (priorité aux régions cibles, mais pas éliminatoire)
+4. Type de procédure (ouvert = accessible, restreint = compétitif)
+5. Signaux faibles détectés par le pré-scoring
 
 Réponds UNIQUEMENT en JSON:
 {
   "score": <number 0-10>,
-  "reason": "<justification en 1-2 phrases>"
+  "reason": "<justification en 1-2 phrases incluant budget et localisation>"
 }
             `.trim()
           }
@@ -382,6 +597,8 @@ Profil client:
 - Effectif: ${client.financial.employees} personnes
 - Années d'expérience: ${client.financial.yearsInBusiness}
 - Références similaires: ${client.technical.references} projets
+- Budget minimum ciblé: ${client.criteria.minBudget}€
+- Régions d'intervention: ${client.criteria.regions?.join(', ') || 'National'}
 
 Appel d'offres:
 - Titre: ${ao.title}
@@ -526,6 +743,89 @@ const saveResultsStep = createStep({
     
     // Sauvegarde dans Supabase
     for (const ao of scored) {
+      // ────────────────────────────────────────────────────────────
+      // CAS SPÉCIAL : Rectificatif substantiel
+      // ────────────────────────────────────────────────────────────
+      if (ao._isRectification && ao._originalAO) {
+        console.log(`💾 Sauvegarde rectificatif substantiel: ${ao.title}`);
+        
+        // Construire l'historique
+        const history = ao._originalAO.analysis_history || [];
+        history.push({
+          date: ao._originalAO.analyzed_at,
+          semantic_score: ao._originalAO.semantic_score,
+          feasibility: ao._originalAO.feasibility,
+          priority: ao._originalAO.priority,
+          final_score: ao._originalAO.final_score,
+          rejected_reason: ao._originalAO.rejected_reason || null
+        });
+        
+        // UPDATE de l'AO existant (pas INSERT)
+        await supabase.from('appels_offres').update({
+          // Contenu
+          title: ao.title,
+          description: ao.description,
+          keywords: ao.keywords,
+          
+          // Acheteur
+          acheteur: ao.acheteur,
+          acheteur_email: ao.acheteur_email,
+          acheteur_tel: ao.acheteur_tel,
+          
+          // Budget & Dates
+          budget_max: ao.budget_max,
+          deadline: ao.deadline,
+          publication_date: ao.publication_date,
+          
+          // Classification
+          type_marche: ao.type_marche,
+          region: ao.region,
+          url_ao: ao.url_ao,
+          
+          // Analyse keywords
+          keyword_score: ao.keywordScore,
+          matched_keywords: ao.matchedKeywords,
+          
+          // Analyse sémantique
+          semantic_score: ao.semanticScore,
+          semantic_reason: ao.semanticReason,
+          
+          // Analyse faisabilité
+          feasibility: ao.feasibility,
+          
+          // Scoring final
+          final_score: ao.finalScore,
+          priority: ao.priority,
+          
+          // Context enrichi
+          procedure_type: ao.procedureType,
+          has_correctif: ao.hasCorrectif,
+          is_renewal: ao.isRenewal,
+          warnings: ao.warnings,
+          criteres_attribution: ao.criteresAttribution,
+          
+          // Métadonnées
+          raw_json: ao.raw_json,
+          status: 'analyzed',
+          analyzed_at: new Date().toISOString(),
+          
+          // 🆕 Gestion du rectificatif
+          is_rectified: true,
+          rectification_date: new Date().toISOString(),
+          rectification_count: (ao._originalAO.rectification_count || 0) + 1,
+          analysis_history: history,
+          rectification_changes: {
+            changes: ao._changes.changes,
+            detected_at: new Date().toISOString()
+          }
+        }).eq('id', ao._originalAO.id);
+        
+        continue; // Passer à l'AO suivant
+      }
+      
+      // ────────────────────────────────────────────────────────────
+      // CAS NORMAL : AO nouveau ou non-rectificatif
+      // ────────────────────────────────────────────────────────────
       await supabase.from('appels_offres').upsert({
         // Identifiants
         source: ao.source,
@@ -605,7 +905,7 @@ export const aoVeilleWorkflow = createWorkflow({
   id: 'ao-veille-workflow',
   inputSchema: z.object({
     clientId: z.string(),
-    since: z.string()
+    since: z.string().optional()
   }),
   outputSchema: z.object({
     saved: z.number(),
@@ -615,6 +915,8 @@ export const aoVeilleWorkflow = createWorkflow({
   })
 })
   .then(fetchAndPrequalifyStep)
+  .then(handleCancellationsStep)      // 🆕 STEP 1b: Gestion annulations
+  .then(detectRectificationStep)      // 🆕 STEP 1c: Détection rectificatifs
   .then(keywordMatchingStep)
   .then(semanticAnalysisStep)
   .then(feasibilityAnalysisStep)

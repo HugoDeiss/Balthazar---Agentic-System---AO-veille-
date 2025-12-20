@@ -2,6 +2,70 @@
 import { createTool } from '@mastra/core';
 import { z } from 'zod';
 
+// Mapping département → région
+const DEPARTEMENT_TO_REGION: Record<string, string> = {
+  // Île-de-France
+  '75': 'Île-de-France', '77': 'Île-de-France', '78': 'Île-de-France',
+  '91': 'Île-de-France', '92': 'Île-de-France', '93': 'Île-de-France',
+  '94': 'Île-de-France', '95': 'Île-de-France',
+  
+  // Auvergne-Rhône-Alpes
+  '01': 'Auvergne-Rhône-Alpes', '03': 'Auvergne-Rhône-Alpes', '07': 'Auvergne-Rhône-Alpes',
+  '15': 'Auvergne-Rhône-Alpes', '26': 'Auvergne-Rhône-Alpes', '38': 'Auvergne-Rhône-Alpes',
+  '42': 'Auvergne-Rhône-Alpes', '43': 'Auvergne-Rhône-Alpes', '63': 'Auvergne-Rhône-Alpes',
+  '69': 'Auvergne-Rhône-Alpes', '73': 'Auvergne-Rhône-Alpes', '74': 'Auvergne-Rhône-Alpes',
+  
+  // Provence-Alpes-Côte d'Azur
+  '04': 'Provence-Alpes-Côte d\'Azur', '05': 'Provence-Alpes-Côte d\'Azur', '06': 'Provence-Alpes-Côte d\'Azur',
+  '13': 'Provence-Alpes-Côte d\'Azur', '83': 'Provence-Alpes-Côte d\'Azur', '84': 'Provence-Alpes-Côte d\'Azur',
+  
+  // Nouvelle-Aquitaine
+  '16': 'Nouvelle-Aquitaine', '17': 'Nouvelle-Aquitaine', '19': 'Nouvelle-Aquitaine',
+  '23': 'Nouvelle-Aquitaine', '24': 'Nouvelle-Aquitaine', '33': 'Nouvelle-Aquitaine',
+  '40': 'Nouvelle-Aquitaine', '47': 'Nouvelle-Aquitaine', '64': 'Nouvelle-Aquitaine',
+  '79': 'Nouvelle-Aquitaine', '86': 'Nouvelle-Aquitaine', '87': 'Nouvelle-Aquitaine',
+  
+  // Occitanie
+  '09': 'Occitanie', '11': 'Occitanie', '12': 'Occitanie', '30': 'Occitanie',
+  '31': 'Occitanie', '32': 'Occitanie', '34': 'Occitanie', '46': 'Occitanie',
+  '48': 'Occitanie', '65': 'Occitanie', '66': 'Occitanie', '81': 'Occitanie', '82': 'Occitanie',
+  
+  // Hauts-de-France
+  '02': 'Hauts-de-France', '59': 'Hauts-de-France', '60': 'Hauts-de-France',
+  '62': 'Hauts-de-France', '80': 'Hauts-de-France',
+  
+  // Normandie
+  '14': 'Normandie', '27': 'Normandie', '50': 'Normandie', '61': 'Normandie', '76': 'Normandie',
+  
+  // Grand Est
+  '08': 'Grand Est', '10': 'Grand Est', '51': 'Grand Est', '52': 'Grand Est',
+  '54': 'Grand Est', '55': 'Grand Est', '57': 'Grand Est', '67': 'Grand Est',
+  '68': 'Grand Est', '88': 'Grand Est',
+  
+  // Pays de la Loire
+  '44': 'Pays de la Loire', '49': 'Pays de la Loire', '53': 'Pays de la Loire',
+  '72': 'Pays de la Loire', '85': 'Pays de la Loire',
+  
+  // Bretagne
+  '22': 'Bretagne', '29': 'Bretagne', '35': 'Bretagne', '56': 'Bretagne',
+  
+  // Centre-Val de Loire
+  '18': 'Centre-Val de Loire', '28': 'Centre-Val de Loire', '36': 'Centre-Val de Loire',
+  '37': 'Centre-Val de Loire', '41': 'Centre-Val de Loire', '45': 'Centre-Val de Loire',
+  
+  // Bourgogne-Franche-Comté
+  '21': 'Bourgogne-Franche-Comté', '25': 'Bourgogne-Franche-Comté', '39': 'Bourgogne-Franche-Comté',
+  '58': 'Bourgogne-Franche-Comté', '70': 'Bourgogne-Franche-Comté', '71': 'Bourgogne-Franche-Comté',
+  '89': 'Bourgogne-Franche-Comté', '90': 'Bourgogne-Franche-Comté',
+  
+  // Corse
+  '2A': 'Corse', '2B': 'Corse',
+  
+  // DOM-TOM
+  '971': 'Guadeloupe', '972': 'Martinique', '973': 'Guyane',
+  '974': 'La Réunion', '976': 'Mayotte'
+};
+
 export const boampFetcherTool = createTool({
   id: 'boamp-fetcher',
   description: 'Récupère les appels d\'offres BOAMP (hors attributions)',
@@ -9,35 +73,51 @@ export const boampFetcherTool = createTool({
   inputSchema: z.object({
     since: z.string()
       .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .describe('Date au format YYYY-MM-DD (ex: 2025-12-17)'),
+      .describe('Date au format YYYY-MM-DD (ex: 2025-12-17)')
+      .optional(),
     
     typeMarche: z.enum(['SERVICES', 'FOURNITURES', 'TRAVAUX'])
       .default('SERVICES'),
     
     limit: z.number()
       .min(1)
-      .max(100)
-      .default(100),
-    
-    departement: z.string().optional()
-      .describe('Code département (ex: "75")')
+      .max(1000)
+      .default(500)
   }),
   
   execute: async ({ context }) => {
-    const { since, typeMarche, limit, departement } = context;
+    const { since, typeMarche, limit } = context;
     
     const baseUrl = 'https://boamp-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/boamp/records';
     
-    // 🔍 WHERE
+    // 📅 Calcul automatique des dates
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const dateIn7Days = new Date(today);
+    dateIn7Days.setDate(dateIn7Days.getDate() + 7);
+    
+    const formatDate = (date: Date) => date.toISOString().split('T')[0];
+    const targetDate = since || formatDate(yesterday);
+    const minDeadline = formatDate(dateIn7Days);
+    
+    // 🔍 WHERE - Nouvelle stratégie de filtrage structurel
     const whereFilters = [
-      `dateparution >= date'${since}'`,
-      `nature_categorise = 'appeloffre/standard'`,
+      // 1️⃣ TEMPORALITÉ : Avis publiés la veille (ou date spécifiée)
+      `dateparution = date'${targetDate}'`,
+      
+      // 2️⃣ TYPOLOGIE : Nouveaux avis + Rectificatifs + Annulations
+      `(nature_categorise = 'appeloffre/standard' OR annonce_lie IS NOT NULL OR annonces_anterieures IS NOT NULL OR etat = 'AVIS_ANNULE')`,
+      
+      // 3️⃣ ATTRIBUTION : Marché encore ouvert
+      `titulaire IS NULL`,
+      
+      // 4️⃣ DEADLINE : Exploitable (NULL accepté pour AO stratégiques)
+      `(datelimitereponse IS NULL OR datelimitereponse >= date'${minDeadline}')`,
+      
+      // 5️⃣ TYPE MARCHÉ : Compatible conseil
       `type_marche = '${typeMarche}'`
     ];
-    
-    if (departement) {
-      whereFilters.push(`code_departement = '${departement}'`);
-    }
     
     const whereClause = whereFilters.join(' AND ');
     
@@ -129,9 +209,12 @@ export const boampFetcherTool = createTool({
         nature_label: record.nature_libelle,
         
         // Géo
-        region: Array.isArray(record.code_departement)
-          ? record.code_departement[0]
-          : record.code_departement,
+        region: (() => {
+          const codeDept = Array.isArray(record.code_departement)
+            ? record.code_departement[0]
+            : record.code_departement;
+          return DEPARTEMENT_TO_REGION[codeDept] || codeDept;
+        })(),
         
         // Liens
         url_ao: record.url_avis,
@@ -153,7 +236,12 @@ export const boampFetcherTool = createTool({
     
     return {
       source: 'BOAMP',
-      query: { since, typeMarche, departement, limit },
+      query: { 
+        since: targetDate, 
+        typeMarche, 
+        limit,
+        minDeadline 
+      },
       total_count: data.total_count,
       fetched: data.results.length,
       records: normalized
