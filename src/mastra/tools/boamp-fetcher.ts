@@ -223,15 +223,44 @@ export const boampFetcherTool = createTool({
     } while (offset < totalCount);
     
     // ═══════════════════════════════════════════════════════════
-    // ✅ VÉRIFICATION DE COMPLÉTUDE (OBLIGATOIRE)
+    // ✅ VÉRIFICATION DE COMPLÉTUDE (TOLÉRANCE CONTRÔLÉE)
     // ═══════════════════════════════════════════════════════════
-    if (allRecords.length !== totalCount) {
-      const error = `BOAMP FETCH INCOMPLETE: fetched=${allRecords.length}, expected=${totalCount}, missing=${totalCount - allRecords.length}`;
-      console.error(`🚨 ${error}`);
-      throw new Error(error);
-    }
+    const missing = totalCount - allRecords.length;
+    const missingRatio = totalCount > 0 ? missing / totalCount : 0;
     
-    console.log(`✅ Vérification: ${allRecords.length}/${totalCount} AO récupérés (100% exhaustif)`);
+    // Seuils de tolérance (production-grade)
+    const ABSOLUTE_THRESHOLD = 3;      // Max 3 AO manquants
+    const RELATIVE_THRESHOLD = 0.005;  // Max 0.5% de perte
+    
+    if (missing > 0) {
+      // ⚠️ INCOHÉRENCE DÉTECTÉE
+      console.warn(`⚠️ BOAMP INCONSISTENCY: missing=${missing}, total=${totalCount}, ratio=${(missingRatio * 100).toFixed(2)}%`);
+      
+      // Déterminer si l'incohérence est critique
+      const isCritical = missing > ABSOLUTE_THRESHOLD && missingRatio > RELATIVE_THRESHOLD;
+      
+      if (isCritical) {
+        // 🚨 INCOHÉRENCE CRITIQUE → FAIL-FAST
+        const error = `BOAMP FETCH CRITICAL INCONSISTENCY: fetched=${allRecords.length}, expected=${totalCount}, missing=${missing} (${(missingRatio * 100).toFixed(2)}%)`;
+        console.error(`🚨 ${error}`);
+        throw new Error(error);
+      } else {
+        // 🟡 INCOHÉRENCE TOLÉRÉE → CONTINUER AVEC ALERTE
+        console.warn(`🟡 BOAMP INCONSISTENCY TOLERATED: missing=${missing} AO (within acceptable threshold)`);
+        console.warn(`📊 Thresholds: absolute=${ABSOLUTE_THRESHOLD}, relative=${(RELATIVE_THRESHOLD * 100).toFixed(2)}%`);
+        console.warn(`⚠️ This fetch will be marked as DEGRADED`);
+        
+        // TODO: Implémenter retry différé automatique
+        // scheduleRetry({ source: 'boamp', date: targetDate, delayMinutes: 60 });
+      }
+    } else if (missing < 0) {
+      // 🔴 ANOMALIE : Plus de résultats que prévu (impossible normalement)
+      console.error(`🔴 BOAMP ANOMALY: fetched=${allRecords.length} > expected=${totalCount} (surplus=${-missing})`);
+      throw new Error(`BOAMP FETCH ANOMALY: More records than expected (fetched=${allRecords.length}, expected=${totalCount})`);
+    } else {
+      // ✅ EXHAUSTIVITÉ PARFAITE
+      console.log(`✅ Vérification: ${allRecords.length}/${totalCount} AO récupérés (100% exhaustif)`);
+    }
     
     // ═══════════════════════════════════════════════════════════
     // 📊 NORMALISATION (APRÈS PAGINATION)
@@ -305,6 +334,11 @@ export const boampFetcherTool = createTool({
       };
     });
     
+    // Déterminer le statut de la collecte
+    const fetchStatus = missing > 0 
+      ? 'DEGRADED' 
+      : 'OK';
+    
     return {
       source: 'BOAMP',
       query: { 
@@ -315,7 +349,10 @@ export const boampFetcherTool = createTool({
       },
       total_count: totalCount,
       fetched: allRecords.length,
+      missing: missing,
+      missing_ratio: missingRatio,
       pages: pageNumber,
+      status: fetchStatus,
       records: normalized
     };
   }
