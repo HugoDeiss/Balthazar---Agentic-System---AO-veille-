@@ -79,14 +79,15 @@ export const boampFetcherTool = createTool({
     typeMarche: z.enum(['SERVICES', 'FOURNITURES', 'TRAVAUX'])
       .default('SERVICES'),
     
-    limit: z.number()
+    pageSize: z.number()
       .min(1)
-      .max(1000)
-      .default(500)
+      .max(300)
+      .default(200)
+      .describe('Taille de page pour pagination (recommandé: 200-300)')
   }),
   
   execute: async ({ context }) => {
-    const { since, typeMarche, limit } = context;
+    const { since, typeMarche, pageSize } = context;
     
     const baseUrl = 'https://boamp-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/boamp/records';
     
@@ -121,51 +122,121 @@ export const boampFetcherTool = createTool({
     
     const whereClause = whereFilters.join(' AND ');
     
-    // 📦 PARAMS
-    const params = new URLSearchParams({
-      select: [
-        // 🔴 Essentiels
-        'idweb',
-        'objet',
-        'nomacheteur',
-        'dateparution',
-        'datelimitereponse',
-        'type_marche',
-        'nature_categorise',
-        'nature_libelle',
-        'url_avis',
-        'code_departement',
-        'descripteur_libelle',  // Mots-clés
-        
-        // 🟠 Enrichissement
-        'donnees',              // JSON complet
-        
-        // 🆕 Nouveaux champs pour filtrage et analyse
-        'etat',                 // État de l'AO (AVIS_ANNULE, etc.)
-        'procedure_libelle',    // Type de procédure (ouvert, restreint, etc.)
-        'criteres',             // Critères d'attribution
-        'annonce_lie',          // Correctifs publiés
-        'annonces_anterieures', // Renouvellements
-        'titulaire',            // Attribution (null = pas encore attribué)
-        'marche_public_simplifie', // MPS
-        'famille_libelle'       // Famille de marché
-      ].join(','),
+    // 📦 SELECT (champs à récupérer)
+    const selectFields = [
+      // 🔴 Essentiels
+      'idweb',
+      'objet',
+      'nomacheteur',
+      'dateparution',
+      'datelimitereponse',
+      'type_marche',
+      'nature_categorise',
+      'nature_libelle',
+      'url_avis',
+      'code_departement',
+      'descripteur_libelle',  // Mots-clés
       
-      where: whereClause,
-      order_by: 'dateparution desc',
-      limit: limit.toString()
-    });
+      // 🟠 Enrichissement
+      'donnees',              // JSON complet
+      
+      // 🆕 Nouveaux champs pour filtrage et analyse
+      'etat',                 // État de l'AO (AVIS_ANNULE, etc.)
+      'procedure_libelle',    // Type de procédure (ouvert, restreint, etc.)
+      'criteres',             // Critères d'attribution
+      'annonce_lie',          // Correctifs publiés
+      'annonces_anterieures', // Renouvellements
+      'titulaire',            // Attribution (null = pas encore attribué)
+      'marche_public_simplifie', // MPS
+      'famille_libelle'       // Famille de marché
+    ].join(',');
     
-    // 🌐 FETCH
-    console.log(`🔗 Fetching BOAMP: ${baseUrl}?${params}`);
+    // ═══════════════════════════════════════════════════════════
+    // 🔄 PAGINATION EXHAUSTIVE (CRITIQUE)
+    // ═══════════════════════════════════════════════════════════
+    console.log(`🔗 Fetching BOAMP avec pagination exhaustive...`);
+    console.log(`📅 Date cible: ${targetDate}`);
+    console.log(`📦 Page size: ${pageSize}`);
     
-    const response = await fetch(`${baseUrl}?${params}`);
+    let allRecords: any[] = [];
+    let offset = 0;
+    let totalCount = 0;
+    let pageNumber = 1;
     
-    if (!response.ok) {
-      throw new Error(`BOAMP API error ${response.status}`);
+    do {
+      // Construire les paramètres de requête pour cette page
+      const params = new URLSearchParams({
+        select: selectFields,
+        where: whereClause,
+        order_by: 'dateparution desc',
+        limit: pageSize.toString(),
+        offset: offset.toString()
+      });
+      
+      console.log(`📄 Page ${pageNumber}: fetching ${pageSize} AO (offset=${offset})...`);
+      
+      const response = await fetch(`${baseUrl}?${params}`);
+      
+      if (!response.ok) {
+        throw new Error(`BOAMP API error ${response.status} on page ${pageNumber}`);
+      }
+      
+      const data = await response.json();
+      
+      // Première page : récupérer le total_count
+      if (pageNumber === 1) {
+        totalCount = data.total_count || 0;
+        console.log(`📊 Total AO disponibles: ${totalCount}`);
+        
+        if (totalCount === 0) {
+          console.log(`ℹ️ Aucun AO trouvé pour les critères spécifiés`);
+          break;
+        }
+        
+        if (totalCount > 1000) {
+          console.warn(`⚠️ ALERTE: ${totalCount} AO détectés (journée exceptionnelle)`);
+        }
+      }
+      
+      // Ajouter les résultats de cette page
+      const pageResults = data.results || [];
+      allRecords.push(...pageResults);
+      
+      console.log(`✅ Page ${pageNumber}: ${pageResults.length} AO récupérés`);
+      console.log(`📊 Progression: ${allRecords.length}/${totalCount} (${Math.round(allRecords.length / totalCount * 100)}%)`);
+      
+      // Condition d'arrêt explicite
+      if (pageResults.length < pageSize || offset + pageSize >= totalCount) {
+        console.log(`🏁 Pagination terminée`);
+        break;
+      }
+      
+      // Préparer la page suivante
+      offset += pageSize;
+      pageNumber++;
+      
+      // Sécurité : éviter les boucles infinies
+      if (pageNumber > 100) {
+        throw new Error(`PAGINATION ABORT: Plus de 100 pages (${pageNumber * pageSize} AO), vérifier la logique`);
+      }
+      
+    } while (offset < totalCount);
+    
+    // ═══════════════════════════════════════════════════════════
+    // ✅ VÉRIFICATION DE COMPLÉTUDE (OBLIGATOIRE)
+    // ═══════════════════════════════════════════════════════════
+    if (allRecords.length !== totalCount) {
+      const error = `BOAMP FETCH INCOMPLETE: fetched=${allRecords.length}, expected=${totalCount}, missing=${totalCount - allRecords.length}`;
+      console.error(`🚨 ${error}`);
+      throw new Error(error);
     }
     
-    const data = await response.json();
+    console.log(`✅ Vérification: ${allRecords.length}/${totalCount} AO récupérés (100% exhaustif)`);
+    
+    // ═══════════════════════════════════════════════════════════
+    // 📊 NORMALISATION (APRÈS PAGINATION)
+    // ═══════════════════════════════════════════════════════════
+    const data = { results: allRecords, total_count: totalCount };
     
     // 📊 NORMALISATION
     const normalized = data.results.map((record: any) => {
@@ -239,11 +310,12 @@ export const boampFetcherTool = createTool({
       query: { 
         since: targetDate, 
         typeMarche, 
-        limit,
+        pageSize,
         minDeadline 
       },
-      total_count: data.total_count,
-      fetched: data.results.length,
+      total_count: totalCount,
+      fetched: allRecords.length,
+      pages: pageNumber,
       records: normalized
     };
   }
