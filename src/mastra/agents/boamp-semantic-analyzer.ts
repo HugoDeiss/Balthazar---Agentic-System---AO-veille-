@@ -125,9 +125,7 @@ AO: "Audit de sécurité informatique"
 Client: Société de développement web (pas spécialisée en sécurité)
 → Score: 6, Reason: "Domaine informatique pertinent mais compétences en sécurité non confirmées"
 `,
-  model: {
-    provider: 'OPEN_AI',
-  },
+  model: 'openai/gpt-4o-mini',
 });
 
 // ──────────────────────────────────────────────────

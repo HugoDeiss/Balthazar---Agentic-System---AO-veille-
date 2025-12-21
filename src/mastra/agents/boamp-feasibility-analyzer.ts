@@ -156,9 +156,7 @@ Client: CA 600k€, 5 références, 10 jours restants
 Critères AO: Délai 5 jours
 → { financial: true, technical: true, timing: false, blockers: ["Délai trop court (5 jours restants)"], confidence: "low" }
 `,
-  model: {
-    provider: 'OPEN_AI',
-  },
+  model: 'openai/gpt-4o',
 });
 
 // ──────────────────────────────────────────────────
