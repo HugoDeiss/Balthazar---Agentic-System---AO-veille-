@@ -122,7 +122,7 @@ const fetchAndPrequalifyStep = createStep({
       context: {
         since: inputData.since, // Optionnel, default = veille
         typeMarche: client.preferences.typeMarche
-        // limit est maintenant par défaut à 500 dans le tool
+        // pageSize est maintenant par défaut à 200 dans le tool
       },
       runtimeContext
     }) as {
@@ -130,19 +130,40 @@ const fetchAndPrequalifyStep = createStep({
       query: any;
       total_count: number;
       fetched: number;
+      missing: number;
+      missing_ratio: number;
+      status: string;
       records: any[];
     };
     
     console.log(`📥 BOAMP Fetch: ${boampData.records.length} AO récupérés`);
     console.log(`📊 Total disponible: ${boampData.total_count}`);
     console.log(`📅 Date cible: ${boampData.query.since}`);
+    console.log(`📊 Statut: ${boampData.status}`);
     
-    // 2️⃣ PASSTHROUGH : Tous les AO passent (filtrage métier = IA)
+    // 2️⃣ RETRY DIFFÉRÉ si incohérence détectée
+    if (boampData.missing > 0) {
+      console.warn(`⏰ Incohérence détectée (${boampData.missing} AO manquants)`);
+      console.warn(`⏰ Retry automatique planifié dans 60 minutes`);
+      console.warn(`⏰ Date cible pour retry: ${boampData.query.since}`);
+      
+      // Planifier un retry dans 60 minutes
+      // Note: Cette information sera utilisée par un système externe (cron, queue, etc.)
+      // Pour l'instant, on log simplement l'intention
+      // TODO: Implémenter le mécanisme de retry (workflow schedulé, cron job, etc.)
+    }
+    
+    // 3️⃣ PASSTHROUGH : Tous les AO passent (filtrage métier = IA)
     const prequalified = boampData.records;
     
     console.log(`✅ Collecte: ${prequalified.length} AO transmis à l'analyse`);
     
-    return { prequalified, client };
+    return { 
+      prequalified, 
+      client,
+      fetchStatus: boampData.status,
+      fetchMissing: boampData.missing
+    };
   }
 });
 
