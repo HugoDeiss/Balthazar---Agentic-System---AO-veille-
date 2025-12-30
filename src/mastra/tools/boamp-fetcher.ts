@@ -1,6 +1,8 @@
 // src/mastra/tools/boamp-fetcher.ts
 import { createTool } from '@mastra/core';
 import { z } from 'zod';
+import { persistBaseAO, markCancelledAOById } from '../../persistence/ao-persistence';
+import { deduplicateAO, isCancellationNotice } from '../../domain/ao';
 
 // Mapping département → région
 const DEPARTEMENT_TO_REGION: Record<string, string> = {
@@ -63,8 +65,171 @@ const DEPARTEMENT_TO_REGION: Record<string, string> = {
   
   // DOM-TOM
   '971': 'Guadeloupe', '972': 'Martinique', '973': 'Guyane',
-  '974': 'La Réunion', '976': 'Mayotte'
+  '974': 'La Réunion',   '976': 'Mayotte'
 };
+
+// ═══════════════════════════════════════════════════════════
+// 🔄 NORMALISATION BOAMP → AO CANONIQUE
+// ═══════════════════════════════════════════════════════════
+/**
+ * Normalise un record BOAMP brut en AO canonique
+ * Règle d'or : le record brut ne doit plus être référencé après cet appel
+ */
+function normalizeBoampRecord(rawRecord: any) {
+  // Gérer la structure OpenDataSoft : les champs peuvent être dans record.fields
+  // OpenDataSoft v2.1 renvoie : { results: [{ record: { fields: {...} } }] }
+  const fields = rawRecord.record?.fields || rawRecord.fields || rawRecord;
+  
+  // Parse le JSON "donnees" pour extraire les infos riches
+  let donneesObj: any = null;
+  try {
+    donneesObj = typeof fields.donnees === 'string' 
+      ? JSON.parse(fields.donnees) 
+      : fields.donnees;
+  } catch (e) {
+    console.warn(`Failed to parse donnees for ${fields.idweb}`);
+  }
+  
+  // Calcul de la région depuis le département
+  const codeDept = Array.isArray(fields.code_departement)
+    ? fields.code_departement[0]
+    : fields.code_departement;
+  const region = DEPARTEMENT_TO_REGION[codeDept] || codeDept;
+  
+  // Normalisation du type_marche (array → string)
+  const type_marche = Array.isArray(fields.type_marche) 
+    ? fields.type_marche[0] 
+    : fields.type_marche;
+  
+  // Construction de l'AO canonique structuré
+  const ao = {
+    // 🟦 Identité source (niveau racine)
+    source: 'BOAMP',
+    source_id: fields.idweb,
+
+    // 🟦 Identity : Identité de l'AO
+    identity: {
+      title: fields.objet || '',
+      acheteur: fields.nomacheteur || null,
+      url: fields.url_avis || null,
+      region: region
+    },
+
+    // 🟦 Lifecycle : Cycle de vie de l'AO
+    lifecycle: {
+      etat: fields.etat || null,
+      nature: fields.nature_categorise || null,
+      nature_label: fields.nature_libelle || null,
+      annonce_lie: fields.annonce_lie || null,
+      annonces_anterieures: fields.annonces_anterieures || null,
+      publication_date: fields.dateparution,
+      deadline: fields.datelimitereponse || null
+    },
+
+    // 🟦 Content : Contenu analysable
+    content: {
+      description: donneesObj?.OBJET?.OBJET_COMPLET || fields.objet || '',
+      keywords: fields.descripteur_libelle || []
+    },
+
+    // 🟦 Classification : Classification de l'AO
+    classification: {
+      type_marche: type_marche,
+      procedure: fields.procedure_libelle || null,
+      famille: fields.famille_libelle || null
+    },
+
+    // 🟦 Metadata : Métadonnées complémentaires
+    metadata: {
+      acheteur_email: donneesObj?.IDENTITE?.MEL || null,
+      acheteur_tel: donneesObj?.IDENTITE?.TEL || null,
+      acheteur_adresse: donneesObj?.IDENTITE?.ADRESSE || null,
+      acheteur_cp: donneesObj?.IDENTITE?.CP || null,
+      acheteur_ville: donneesObj?.IDENTITE?.VILLE || null,
+      criteres: fields.criteres || null,
+      marche_public_simplifie: fields.marche_public_simplifie || null,
+      titulaire: fields.titulaire || null
+    }
+  };
+  
+  // Le record brut n'est plus référencé après ce point
+  // Il devient éligible au GC immédiatement
+  return ao;
+}
+
+// Type explicite pour l'AO canonique
+export type CanonicalAO = ReturnType<typeof normalizeBoampRecord>;
+
+// ═══════════════════════════════════════════════════════════
+// 🔄 TRAITEMENT EN FLUX : Chaque AO est traité immédiatement
+// ═══════════════════════════════════════════════════════════
+/**
+ * Traite un AO canonique en flux
+ * Chef d'orchestre : coordonne déduplication, persistance et analyse
+ * 
+ * Pipeline linéaire :
+ * 1. Déduplication → décision (CREATE, SKIP, CANCEL, RECTIFY)
+ * 2. Action selon décision
+ * 3. [À venir] Analyse sémantique (pour CREATE uniquement)
+ */
+async function processAO(ao: CanonicalAO) {
+  try {
+    // 1. Décision de déduplication
+    const decision = await deduplicateAO(ao);
+
+    switch (decision.action) {
+      case 'CREATE': {
+        console.log(`🆕 CREATE AO ${ao.source_id}`);
+
+        const inserted = await persistBaseAO(ao);
+
+        if (!inserted) {
+          // Cas rare : insertion parallèle détectée
+          console.log(`ℹ️ AO ${ao.source_id} déjà inséré par un autre worker`);
+          return;
+        }
+
+        // Si l'AO est déjà annulé, on applique CANCEL immédiatement
+        if (isCancellationNotice(ao)) {
+          await markCancelledAOById(inserted.id, ao);
+          console.log(`✅ Inserted then cancelled (id=${inserted.id})`);
+          return;
+        }
+
+        console.log(`✅ AO ${ao.source_id} persisté (id=${inserted.id})`);
+        return;
+      }
+
+      case 'SKIP': {
+        console.log(`⏭️ SKIP AO ${ao.source_id} (${decision.reason})`);
+        return;
+      }
+
+      case 'CANCEL': {
+        console.log(`🚫 CANCEL AO ${ao.source_id} (existingId=${decision.existingId})`);
+        const res = await markCancelledAOById(decision.existingId, ao);
+        console.log(res.updated ? `✅ CANCEL applied` : `ℹ️ Already cancelled`);
+        return;
+      }
+
+      case 'RECTIFY': {
+        console.log(`📝 RECTIFY AO ${ao.source_id} (existingId=${decision.existingId})`);
+        // sera implémenté plus tard
+        return;
+      }
+
+      default: {
+        const _exhaustive: never = decision;
+        throw new Error(`Unhandled deduplication decision`);
+      }
+    }
+    
+  } catch (error) {
+    // Gestion d'erreur : on log mais on ne fait pas échouer tout le batch
+    console.error(`❌ Erreur lors du traitement de l'AO ${ao.source_id}:`, error);
+    // On ne throw pas pour éviter de casser le flux pour les autres AO
+  }
+}
 
 export const boampFetcherTool = createTool({
   id: 'boamp-fetcher',
@@ -81,13 +246,16 @@ export const boampFetcherTool = createTool({
     
     pageSize: z.number()
       .min(1)
-      .max(300)
-      .default(200)
-      .describe('Taille de page pour pagination (recommandé: 200-300)')
+      .max(100)
+      .default(100)
+      .describe('Taille de page pour pagination (MAX autorisé: 100 par OpenDataSoft)')
   }),
   
   execute: async ({ context }) => {
-    const { since, typeMarche, pageSize } = context;
+    const { since, typeMarche, pageSize: rawPageSize } = context;
+    
+    // Forcer le maximum à 100 (limite OpenDataSoft)
+    const pageSize = Math.min(rawPageSize || 100, 100);
     
     const baseUrl = 'https://boamp-datadila.opendatasoft.com/api/explore/v2.1/catalog/datasets/boamp/records';
     
@@ -102,25 +270,34 @@ export const boampFetcherTool = createTool({
     const targetDate = since || formatDate(yesterday);
     const minDeadline = formatDate(dateIn7Days);
     
-    // 🔍 WHERE - Nouvelle stratégie de filtrage structurel
-    const whereFilters = [
-      // 1️⃣ TEMPORALITÉ : Avis publiés la veille (ou date spécifiée)
-      `dateparution = date'${targetDate}'`,
-      
-      // 2️⃣ TYPOLOGIE : Nouveaux avis + Rectificatifs + Annulations
-      `(nature_categorise = 'appeloffre/standard' OR annonce_lie IS NOT NULL OR annonces_anterieures IS NOT NULL OR etat = 'AVIS_ANNULE')`,
-      
-      // 3️⃣ ATTRIBUTION : Marché encore ouvert
-      `titulaire IS NULL`,
-      
-      // 4️⃣ DEADLINE : Exploitable (NULL accepté pour AO stratégiques)
-      `(datelimitereponse IS NULL OR datelimitereponse >= date'${minDeadline}')`,
-      
-      // 5️⃣ TYPE MARCHÉ : Compatible conseil
-      `type_marche = '${typeMarche}'`
-    ];
-    
-    const whereClause = whereFilters.join(' AND ');
+    // 🔍 WHERE - Version conforme à la documentation OpenDataSoft ODSQL
+    // 🧪 MODE TEST : Si TEST_AO_ID est défini, fetch uniquement cet AO (ignore tous les autres filtres)
+    const whereClause = process.env.TEST_AO_ID
+      ? `idweb = '${process.env.TEST_AO_ID}'`
+      : (() => {
+          const whereFilters = [
+            // 1️⃣ TEMPORALITÉ : Avis publiés la veille (ou date spécifiée)
+            // Format requis : date'YYYY-MM-DD' selon la doc OpenDataSoft
+            `dateparution = date'${targetDate}'`,
+            
+            // 2️⃣ TYPOLOGIE : Nouveaux avis + Rectificatifs + Annulations
+            // IMPORTANT: Pas de retours à la ligne dans WHERE (OpenDataSoft ne les supporte pas)
+            `(nature_categorise = 'appeloffre/standard' OR annonce_lie IS NOT NULL OR annonces_anterieures IS NOT NULL OR etat = 'AVIS_ANNULE')`,
+            
+            // 3️⃣ TYPE MARCHÉ : Compatible conseil
+            // type_marche est un champ multi-valué (array) dans OpenDataSoft
+            // Syntaxe ODSQL pour vérifier si une valeur est dans un array : 'VALUE' IN field
+            `'${typeMarche}' IN type_marche`,
+            
+            // 4️⃣ DEADLINE : Exploitable (NULL accepté pour AO stratégiques)
+            // Format requis : date'YYYY-MM-DD' selon la doc OpenDataSoft
+            `(datelimitereponse IS NULL OR datelimitereponse >= date'${minDeadline}')`,
+            
+            // 5️⃣ ATTRIBUTION : Marché encore ouvert
+            `titulaire IS NULL`
+          ];
+          return whereFilters.join(' AND ');
+        })();
     
     // 📦 SELECT (champs à récupérer)
     const selectFields = [
@@ -152,16 +329,19 @@ export const boampFetcherTool = createTool({
     ].join(',');
     
     // ═══════════════════════════════════════════════════════════
-    // 🔄 PAGINATION EXHAUSTIVE (CRITIQUE)
+    // 🔄 PAGINATION EXHAUSTIVE AVEC TRAITEMENT EN FLUX
     // ═══════════════════════════════════════════════════════════
+    // Règle d'architecture : Aucun JSON BOAMP brut ne doit traverser le workflow
+    // Chaque record est normalisé puis traité immédiatement (pas de stockage en masse)
     console.log(`🔗 Fetching BOAMP avec pagination exhaustive...`);
     console.log(`📅 Date cible: ${targetDate}`);
-    console.log(`📦 Page size: ${pageSize}`);
+    console.log(`📦 Page size: ${pageSize} (MAX autorisé: 100 par OpenDataSoft)`);
     
-    let allRecords: any[] = [];
+    // Pas de tableau global : traitement en flux (1 AO à la fois)
     let offset = 0;
     let totalCount = 0;
     let pageNumber = 1;
+    let fetchedCount = 0;
     
     do {
       // Construire les paramètres de requête pour cette page
@@ -173,9 +353,14 @@ export const boampFetcherTool = createTool({
         offset: offset.toString()
       });
       
-      console.log(`📄 Page ${pageNumber}: fetching ${pageSize} AO (offset=${offset})...`);
+      const fullUrl = `${baseUrl}?${params}`;
       
-      const response = await fetch(`${baseUrl}?${params}`);
+      console.log(`📄 Page ${pageNumber}: fetching ${pageSize} AO (offset=${offset})...`);
+      console.log(`🔍 WHERE clause: ${whereClause}`);
+      console.log(`🌐 Full URL: ${fullUrl}`);
+      console.log('[BOAMP] WHERE:', whereClause);
+      
+      const response = await fetch(fullUrl);
       
       if (!response.ok) {
         throw new Error(`BOAMP API error ${response.status} on page ${pageNumber}`);
@@ -194,16 +379,29 @@ export const boampFetcherTool = createTool({
         }
         
         if (totalCount > 1000) {
-          console.warn(`⚠️ ALERTE: ${totalCount} AO détectés (journée exceptionnelle)`);
+          console.log(`ℹ️ Volume BOAMP élevé: ${totalCount} AO`);
         }
       }
       
-      // Ajouter les résultats de cette page
+      // Récupérer les résultats bruts de cette page
       const pageResults = data.results || [];
-      allRecords.push(...pageResults);
       
-      console.log(`✅ Page ${pageNumber}: ${pageResults.length} AO récupérés`);
-      console.log(`📊 Progression: ${allRecords.length}/${totalCount} (${Math.round(allRecords.length / totalCount * 100)}%)`);
+      // 🔥 TRAITEMENT EN FLUX : Normalisation puis traitement immédiat
+      for (const rawRecord of pageResults) {
+        // Normaliser immédiatement (le record brut devient éligible au GC après)
+        const ao = normalizeBoampRecord(rawRecord);
+        
+        // Traiter immédiatement (déduplication, analyse, scoring, persistance)
+        await processAO(ao);
+        
+        fetchedCount++;
+        
+        // Le rawRecord et l'ao sortent de scope ici → GC OK
+        // Zéro accumulation mémoire, zéro risque OOM
+      }
+      
+      console.log(`✅ Page ${pageNumber}: ${pageResults.length} AO traités`);
+      console.log(`📊 Progression: ${fetchedCount}/${totalCount} (${Math.round(fetchedCount / totalCount * 100)}%)`);
       
       // Condition d'arrêt explicite
       if (pageResults.length < pageSize || offset + pageSize >= totalCount) {
@@ -215,7 +413,13 @@ export const boampFetcherTool = createTool({
       offset += pageSize;
       pageNumber++;
       
-      // Sécurité : éviter les boucles infinies
+      // Sécurité : respecter la limite OpenDataSoft (offset + limit < 10000)
+      // Avec pageSize=100, max théorique = 100 pages = 10000 AO
+      if (offset + pageSize >= 10000) {
+        throw new Error(`PAGINATION ABORT: Limite OpenDataSoft atteinte (offset=${offset} + limit=${pageSize} >= 10000)`);
+      }
+      
+      // Sécurité supplémentaire : éviter les boucles infinies
       if (pageNumber > 100) {
         throw new Error(`PAGINATION ABORT: Plus de 100 pages (${pageNumber * pageSize} AO), vérifier la logique`);
       }
@@ -223,122 +427,36 @@ export const boampFetcherTool = createTool({
     } while (offset < totalCount);
     
     // ═══════════════════════════════════════════════════════════
-    // ✅ VÉRIFICATION DE COMPLÉTUDE (TOLÉRANCE CONTRÔLÉE)
+    // 📊 RAPPORT DE COMPLÉTUDE (CONSTATATION, PAS DE DÉCISION)
     // ═══════════════════════════════════════════════════════════
-    const missing = totalCount - allRecords.length;
+    // Le fetcher constate les faits, mais ne prend aucune décision métier
+    // Les décisions (seuils, retry, statut) sont prises par le workflow
+    const missing = totalCount - fetchedCount;
     const missingRatio = totalCount > 0 ? missing / totalCount : 0;
     
-    // Seuils de tolérance (production-grade)
-    const ABSOLUTE_THRESHOLD = 3;      // Max 3 AO manquants
-    const RELATIVE_THRESHOLD = 0.005;  // Max 0.5% de perte
-    
+    // Logs informatifs uniquement (pas d'interprétation métier)
     if (missing > 0) {
-      // ⚠️ INCOHÉRENCE DÉTECTÉE
-      console.warn(`⚠️ BOAMP INCONSISTENCY: missing=${missing}, total=${totalCount}, ratio=${(missingRatio * 100).toFixed(2)}%`);
-      
-      // Déterminer si l'incohérence est critique
-      const isCritical = missing > ABSOLUTE_THRESHOLD && missingRatio > RELATIVE_THRESHOLD;
-      
-      if (isCritical) {
-        // 🚨 INCOHÉRENCE CRITIQUE → FAIL-FAST
-        const error = `BOAMP FETCH CRITICAL INCONSISTENCY: fetched=${allRecords.length}, expected=${totalCount}, missing=${missing} (${(missingRatio * 100).toFixed(2)}%)`;
-        console.error(`🚨 ${error}`);
-        throw new Error(error);
-      } else {
-        // 🟡 INCOHÉRENCE TOLÉRÉE → CONTINUER AVEC ALERTE
-        console.warn(`🟡 BOAMP INCONSISTENCY TOLERATED: missing=${missing} AO (within acceptable threshold)`);
-        console.warn(`📊 Thresholds: absolute=${ABSOLUTE_THRESHOLD}, relative=${(RELATIVE_THRESHOLD * 100).toFixed(2)}%`);
-        console.warn(`⚠️ This fetch will be marked as DEGRADED`);
-        
-        // TODO: Implémenter retry différé automatique
-        // scheduleRetry({ source: 'boamp', date: targetDate, delayMinutes: 60 });
-      }
+      console.log(`📊 BOAMP fetch: missing=${missing}, total=${totalCount}, ratio=${(missingRatio * 100).toFixed(2)}%`);
     } else if (missing < 0) {
-      // 🔴 ANOMALIE : Plus de résultats que prévu (impossible normalement)
-      console.error(`🔴 BOAMP ANOMALY: fetched=${allRecords.length} > expected=${totalCount} (surplus=${-missing})`);
-      throw new Error(`BOAMP FETCH ANOMALY: More records than expected (fetched=${allRecords.length}, expected=${totalCount})`);
+      console.log(`📊 BOAMP fetch: surplus=${-missing}, fetched=${fetchedCount}, expected=${totalCount}`);
     } else {
-      // ✅ EXHAUSTIVITÉ PARFAITE
-      console.log(`✅ Vérification: ${allRecords.length}/${totalCount} AO récupérés (100% exhaustif)`);
+      console.log(`📊 BOAMP fetch: ${fetchedCount}/${totalCount} AO traités (100% exhaustif)`);
     }
     
-    // ═══════════════════════════════════════════════════════════
-    // 📊 NORMALISATION (APRÈS PAGINATION)
-    // ═══════════════════════════════════════════════════════════
-    const data = { results: allRecords, total_count: totalCount };
+    // Rapport de fetch (constatation pure, sans décision métier)
+    // Calcul précis du nombre de pages réellement fetchées
+    const pagesFetched = Math.ceil(fetchedCount / pageSize);
     
-    // 📊 NORMALISATION
-    const normalized = data.results.map((record: any) => {
-      // Parse le JSON "donnees" pour extraire les infos riches
-      let donneesObj: any = null;
-      try {
-        donneesObj = typeof record.donnees === 'string' 
-          ? JSON.parse(record.donnees) 
-          : record.donnees;
-      } catch (e) {
-        console.warn(`Failed to parse donnees for ${record.idweb}`);
-      }
-      
-      return {
-        // IDs
-        source: 'BOAMP',
-        source_id: record.idweb,
-        
-        // Contenu
-        title: record.objet,
-        description: donneesObj?.OBJET?.OBJET_COMPLET || record.objet,
-        keywords: record.descripteur_libelle || [],
-        
-        // Acheteur
-        acheteur: record.nomacheteur,
-        acheteur_email: donneesObj?.IDENTITE?.MEL || null,
-        acheteur_tel: donneesObj?.IDENTITE?.TEL || null,
-        acheteur_adresse: donneesObj?.IDENTITE?.ADRESSE || null,
-        acheteur_cp: donneesObj?.IDENTITE?.CP || null,
-        acheteur_ville: donneesObj?.IDENTITE?.VILLE || null,
-        
-        // Dates
-        publication_date: record.dateparution,
-        deadline: record.datelimitereponse,
-        
-        // Type
-        type_marche: Array.isArray(record.type_marche) 
-          ? record.type_marche[0] 
-          : record.type_marche,
-        nature: record.nature_categorise,
-        nature_label: record.nature_libelle,
-        
-        // Géo
-        region: (() => {
-          const codeDept = Array.isArray(record.code_departement)
-            ? record.code_departement[0]
-            : record.code_departement;
-          return DEPARTEMENT_TO_REGION[codeDept] || codeDept;
-        })(),
-        
-        // Liens
-        url_ao: record.url_avis,
-        
-        // 🆕 Nouveaux champs pour filtrage et analyse
-        etat: record.etat || null,
-        procedure_libelle: record.procedure_libelle || null,
-        criteres: record.criteres || null,
-        annonce_lie: record.annonce_lie || null,
-        annonces_anterieures: record.annonces_anterieures || null,
-        titulaire: record.titulaire || null,
-        marche_public_simplifie: record.marche_public_simplifie || null,
-        famille_libelle: record.famille_libelle || null,
-        
-        // Backup
-        raw_json: record
-      };
-    });
+    const fetchReport = {
+      expected: totalCount,
+      fetched: fetchedCount,
+      missing: missing,
+      missing_ratio: missingRatio,
+      pages: pagesFetched
+    };
     
-    // Déterminer le statut de la collecte
-    const fetchStatus = missing > 0 
-      ? 'DEGRADED' 
-      : 'OK';
-    
+    // Le fetcher ne retourne plus les AO, seulement un rapport
+    // Logique : le fetcher constate, le métier agit, la DB se souvient
     return {
       source: 'BOAMP',
       query: { 
@@ -347,13 +465,7 @@ export const boampFetcherTool = createTool({
         pageSize,
         minDeadline 
       },
-      total_count: totalCount,
-      fetched: allRecords.length,
-      missing: missing,
-      missing_ratio: missingRatio,
-      pages: pageNumber,
-      status: fetchStatus,
-      records: normalized
+      report: fetchReport
     };
   }
 });
