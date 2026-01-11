@@ -9,6 +9,7 @@ import {
 } from './rectificatif-utils';
 import { checkBatchAlreadyAnalyzed } from '../../persistence/ao-persistence';
 import { scheduleRetry } from '../../utils/retry-scheduler';
+import { calculateKeywordScore } from '../../utils/balthazar-keywords';
 
 // ──────────────────────────────────────────────────
 // SUPABASE CLIENT
@@ -486,6 +487,8 @@ const keywordMatchingStep = createStep({
     keywordMatched: z.array(aoSchema.extend({
       keywordScore: z.number(),
       matchedKeywords: z.array(z.string()),
+      keywordDetails: z.any().optional(),
+      _shouldSkipLLM: z.boolean().optional(),
       keywordSignals: z.record(z.boolean()).optional(),
       _isRectification: z.boolean().optional(),
       _originalAO: z.any().optional(),
@@ -496,53 +499,50 @@ const keywordMatchingStep = createStep({
   execute: async ({ inputData }) => {
     const { toAnalyze: prequalified, client } = inputData;
     
-    // 🎯 NOUVEAU : Pré-score NON BLOQUANT
-    // Ne rejette JAMAIS un AO, produit seulement des signaux pour l'IA
+    console.log(`🔍 Keyword matching amélioré (lexique Balthazar) sur ${prequalified.length} AO...`);
+    
     const keywordMatched = prequalified.map(ao => {
-      const aoKeywords = [
-        ...(ao.keywords || []),
-        ao.title.toLowerCase(),
-        ao.description?.toLowerCase() || ''
-      ].join(' ');
-      
-      // Compte combien de keywords client matchent
-      const matchedKeywords = client.keywords.filter(kw => 
-        aoKeywords.includes(kw.toLowerCase())
+      // Utiliser la nouvelle fonction de scoring
+      const scoreResult = calculateKeywordScore(
+        ao.title,
+        ao.description,
+        ao.keywords,
+        ao.acheteur
       );
-      const matchCount = matchedKeywords.length;
-      const keywordScore = matchCount / client.keywords.length;
       
-      // 🆕 Signaux faibles : détection de concepts clés
-      const keywordSignals: Record<string, boolean> = {
-        strategy: /stratégie|stratégique/i.test(aoKeywords),
-        transformation: /transformation|digitale|numérique/i.test(aoKeywords),
-        innovation: /innovation|innovant/i.test(aoKeywords),
-        management: /management|pilotage|gestion/i.test(aoKeywords),
-        performance: /performance|efficacité|optimisation/i.test(aoKeywords),
-        conseil: /conseil|consulting|accompagnement/i.test(aoKeywords),
-        audit: /audit|diagnostic|évaluation/i.test(aoKeywords),
-        conduite_changement: /conduite.{0,5}changement|change.{0,5}management/i.test(aoKeywords)
-      };
+      // Convertir score 0-100 → 0-1 pour compatibilité avec score final actuel
+      const keywordScore = scoreResult.score / 100;
       
-      // Analyse des critères d'attribution pour scorer la compétitivité
-      const criteres = ao.raw_json?.criteres || null;
+      // Signal pour skip LLM si score trop faible (économie de coûts)
+      const shouldSkipLLM = scoreResult.score < 30 || scoreResult.red_flags_detected.length > 0;
+      
+      // Analyse des critères d'attribution pour scorer la compétitivité (conservé pour compatibilité)
+      const criteres = ao.raw_json?.metadata?.criteres || ao.raw_json?.criteres || null;
       
       return {
         ...ao,
-        keywordScore,
-        matchedKeywords,
-        keywordSignals,
-        criteresAttribution: criteres,
+        keywordScore, // 0-1 (compatible avec workflow actuel)
+        matchedKeywords: scoreResult.allMatches, // Pour compatibilité
+        keywordDetails: scoreResult, // Détails complets pour utilisation future
+        _shouldSkipLLM: shouldSkipLLM, // Metadata pour optimisation
         // Préserver les métadonnées de rectificatif
         _isRectification: ao._isRectification,
         _originalAO: ao._originalAO,
-        _changes: ao._changes
+        _changes: ao._changes,
+        criteresAttribution: criteres
       };
     })
-    // 🆕 PLUS DE FILTRE : tous les AO passent
     .sort((a, b) => b.keywordScore - a.keywordScore);
     
-    console.log(`✅ Keyword matching: ${keywordMatched.length}/${prequalified.length} AO (tous transmis avec pré-score)`);
+    const skippedLLMCount = keywordMatched.filter(ao => ao._shouldSkipLLM).length;
+    const avgScore = keywordMatched.length > 0
+      ? (keywordMatched.reduce((sum, ao) => sum + ao.keywordScore, 0) / keywordMatched.length * 100).toFixed(1)
+      : '0';
+    console.log(`✅ Keyword matching: ${keywordMatched.length} AO`);
+    console.log(`   📊 Score moyen: ${avgScore}/100`);
+    if (skippedLLMCount > 0) {
+      console.log(`   ⚡ ${skippedLLMCount} AO signalés pour skip LLM (score < 30 ou red flags)`);
+    }
     
     return { keywordMatched, client };
   }
@@ -898,6 +898,88 @@ const handleMinorRectificationAOStep = createStep({
 });
 
 // ──────────────────────────────────────────────────
+// BRANCH 2.5 : GESTION SKIP LLM (score keywords uniquement)
+// ──────────────────────────────────────────────────
+const handleSkipLLMAOStep = createStep({
+  id: 'handle-skip-llm-ao',
+  inputSchema: z.object({
+    ao: aoSchema.extend({
+      keywordScore: z.number(),
+      matchedKeywords: z.array(z.string()),
+      keywordDetails: z.any().optional(),
+      _shouldSkipLLM: z.boolean().optional(),
+      _isRectification: z.boolean().optional(),
+      _originalAO: z.any().optional(),
+      _changes: z.any().optional()
+    }),
+    client: clientSchema
+  }),
+  outputSchema: z.object({
+    ao: aoSchema.extend({
+      keywordScore: z.number(),
+      matchedKeywords: z.array(z.string()),
+      semanticScore: z.number().optional(),
+      semanticReason: z.string().optional(),
+      feasibility: z.object({
+        financial: z.boolean(),
+        technical: z.boolean(),
+        timing: z.boolean(),
+        blockers: z.array(z.string()),
+        confidence: z.enum(['high', 'medium', 'low'])
+      }).optional(),
+      isFeasible: z.boolean().optional(),
+      finalScore: z.number(),
+      priority: z.enum(['HIGH', 'MEDIUM', 'LOW', 'CANCELLED']),
+      _isRectification: z.boolean().optional(),
+      _originalAO: z.any().optional(),
+      _changes: z.any().optional()
+    }),
+    client: clientSchema
+  }),
+  execute: async ({ inputData }) => {
+    const { ao, client } = inputData;
+    
+    console.log(`⚡ SKIP LLM: ${ao.title} (${ao.source_id})`);
+    const keywordDetails = (ao as any).keywordDetails;
+    if (keywordDetails) {
+      console.log(`   Score keywords: ${keywordDetails.score}/100 (${keywordDetails.confidence})`);
+      if (keywordDetails.red_flags_detected && keywordDetails.red_flags_detected.length > 0) {
+        console.log(`   ⚠️ Red flags: ${keywordDetails.red_flags_detected.join(', ')}`);
+      }
+    }
+    
+    // Calculer score final uniquement basé sur keywords (pas de LLM)
+    // Convertir score keywords 0-100 → 0-10 pour le score final
+    const keywordScoreOn10 = keywordDetails 
+      ? keywordDetails.score / 10  // 0-100 → 0-10
+      : ao.keywordScore * 10;      // 0-1 → 0-10 (backward compat)
+    
+    // Score final basé uniquement sur keywords (avec pénalité car pas d'analyse LLM)
+    // Pénalité de 30% car pas d'analyse sémantique/faisabilité
+    const finalScore = keywordScoreOn10 * 0.7; // Max 7/10 au lieu de 10/10
+    
+    // Priorisation basée sur score réduit
+    const priority: 'HIGH' | 'MEDIUM' | 'LOW' = 
+      finalScore >= 5.6 ? 'MEDIUM' : // 80% de 7
+      finalScore >= 4.2 ? 'LOW' : 'LOW'; // 60% de 7
+    
+    console.log(`✅ Score final (keywords only): ${finalScore.toFixed(2)}/10 - Priorité: ${priority}`);
+    
+    return {
+      ao: {
+        ...ao,
+        // Pas de semanticScore ni feasibility (skip LLM)
+        finalScore,
+        priority,
+        // Flag pour indiquer que c'était un skip LLM
+        _skipLLM: true
+      },
+      client
+    };
+  }
+});
+
+// ──────────────────────────────────────────────────
 // STEP : ANALYSE SÉMANTIQUE D'UN SEUL AO
 // ──────────────────────────────────────────────────
 const analyzeOneAOSemanticStep = createStep({
@@ -1204,13 +1286,17 @@ const scoreOneAOStep = createStep({
     console.log(`🎯 Scoring de l'AO: ${ao.title}`);
     
     // Calcul score global (0-10)
-    // Toutes les composantes sont normalisées sur l'échelle 0-10
+    // Utiliser keywordDetails si disponible (nouveau scoring), sinon fallback
+    const keywordContribution = (ao as any).keywordDetails
+      ? ((ao as any).keywordDetails.score / 100) * 0.25  // Nouveau: 25% du score (0-100 → 0-10)
+      : (ao.keywordScore * 10) * 0.2;                    // Ancien: 20% (backward compat)
+    
     const score = (
-      ao.semanticScore * 0.4 +              // Pertinence: 40% (déjà sur 0-10)
-      (ao.keywordScore * 10) * 0.2 +        // Keywords: 20% (0-1 → 0-10)
+      ao.semanticScore * 0.35 +              // Pertinence: 35% (réduit de 40%)
+      keywordContribution +                   // Keywords: 20-25% (selon version)
       (ao.feasibility.confidence === 'high' ? 10 : 
-       ao.feasibility.confidence === 'medium' ? 7 : 4) * 0.3 + // Faisabilité: 30% (0-10)
-      (1 - Math.min(ao.daysRemaining / 60, 1)) * 10 * 0.1  // Urgence: 10% (0-1 → 0-10)
+       ao.feasibility.confidence === 'medium' ? 7 : 4) * 0.30 + // Faisabilité: 30%
+      (1 - Math.min(ao.daysRemaining / 60, 1)) * 10 * 0.10  // Urgence: 10% (réduit de 10%)
     );
     
     // Priorisation
@@ -1219,6 +1305,10 @@ const scoreOneAOStep = createStep({
       score >= 6 ? 'MEDIUM' : 'LOW';
     
     console.log(`✅ Score final: ${score.toFixed(2)}/10 - Priorité: ${priority} - ${ao.title}`);
+    if ((ao as any).keywordDetails) {
+      const details = (ao as any).keywordDetails;
+      console.log(`   📊 Keyword breakdown: Secteurs ${details.breakdown.secteur_score} + Expertises ${details.breakdown.expertise_score} + Posture ${details.breakdown.posture_score} = ${details.score}/100`);
+    }
     
     return {
       ao: {
@@ -1361,6 +1451,23 @@ const processOneAOWorkflow = createWorkflow({
     ],
     
     // ────────────────────────────────────────────────────
+    // BRANCH 2.5 : SKIP LLM (score keywords uniquement)
+    // ────────────────────────────────────────────────────
+    // Critère : _shouldSkipLLM === true
+    // Action : Score basé uniquement sur keywords, skip analyses LLM
+    // Coût LLM : 0
+    [
+      async ({ inputData }) => {
+        const shouldSkip = (inputData.ao as any)._shouldSkipLLM === true;
+        if (shouldSkip) {
+          console.log(`🔀 Branch 2.5: SKIP LLM détecté - ${inputData.ao.title}`);
+        }
+        return shouldSkip;
+      },
+      handleSkipLLMAOStep
+    ],
+    
+    // ────────────────────────────────────────────────────
     // BRANCH 3 : RECTIFICATIF SUBSTANTIEL
     // ────────────────────────────────────────────────────
     // Critère : _isRectification === true && isSubstantial
@@ -1463,15 +1570,19 @@ const aggregateResultsStep = createStep({
     
     // Calcul du nombre d'appels LLM effectués
     // - Branch 1 (CANCELLED) : 0 appel LLM
+    // - Branch 1 (annulé) : 0 appel LLM
     // - Branch 2 (rectificatif mineur) : 0 appel LLM (conserve score original)
+    // - Branch 2.5 (skip LLM) : 0 appel LLM (score keywords uniquement)
     // - Branch 3 (rectificatif substantiel) : 2 appels LLM (semantic + feasibility)
     // - Branch 4 (nouvel AO) : 2 appels LLM (semantic + feasibility)
     // 
     // Les AO avec semanticScore défini ont été analysés par LLM
+    // Exclure les AO avec _skipLLM === true (skip LLM, pas d'analyse)
     const aoWithLLMAnalysis = allAOs.filter(ao => 
       ao.semanticScore !== undefined && 
       ao.semanticScore !== null &&
-      ao.priority !== 'CANCELLED'
+      ao.priority !== 'CANCELLED' &&
+      !(ao as any)._skipLLM
     );
     const llmCalls = aoWithLLMAnalysis.length * 2; // 2 appels par AO (semantic + feasibility)
     

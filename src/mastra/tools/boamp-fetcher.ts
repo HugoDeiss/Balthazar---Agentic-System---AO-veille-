@@ -1,8 +1,6 @@
 // src/mastra/tools/boamp-fetcher.ts
 import { createTool } from '@mastra/core';
 import { z } from 'zod';
-import { persistBaseAO, markCancelledAOById } from '../../persistence/ao-persistence';
-import { deduplicateAO, isCancellationNotice } from '../../domain/ao';
 
 // Mapping département → région
 const DEPARTEMENT_TO_REGION: Record<string, string> = {
@@ -160,77 +158,6 @@ function normalizeBoampRecord(rawRecord: any) {
 // Type explicite pour l'AO canonique
 export type CanonicalAO = ReturnType<typeof normalizeBoampRecord>;
 
-// ═══════════════════════════════════════════════════════════
-// 🔄 TRAITEMENT EN FLUX : Chaque AO est traité immédiatement
-// ═══════════════════════════════════════════════════════════
-/**
- * Traite un AO canonique en flux
- * Chef d'orchestre : coordonne déduplication, persistance et analyse
- * 
- * Pipeline linéaire :
- * 1. Déduplication → décision (CREATE, SKIP, CANCEL, RECTIFY)
- * 2. Action selon décision
- * 3. [À venir] Analyse sémantique (pour CREATE uniquement)
- */
-async function processAO(ao: CanonicalAO) {
-  try {
-    // 1. Décision de déduplication
-    const decision = await deduplicateAO(ao);
-
-    switch (decision.action) {
-      case 'CREATE': {
-        console.log(`🆕 CREATE AO ${ao.source_id}`);
-
-        const inserted = await persistBaseAO(ao);
-
-        if (!inserted) {
-          // Cas rare : insertion parallèle détectée
-          console.log(`ℹ️ AO ${ao.source_id} déjà inséré par un autre worker`);
-          return;
-        }
-
-        // Si l'AO est déjà annulé, on applique CANCEL immédiatement
-        if (isCancellationNotice(ao)) {
-          await markCancelledAOById(inserted.id, ao);
-          console.log(`✅ Inserted then cancelled (id=${inserted.id})`);
-          return;
-        }
-
-        console.log(`✅ AO ${ao.source_id} persisté (id=${inserted.id})`);
-        return;
-      }
-
-      case 'SKIP': {
-        console.log(`⏭️ SKIP AO ${ao.source_id} (${decision.reason})`);
-        return;
-      }
-
-      case 'CANCEL': {
-        console.log(`🚫 CANCEL AO ${ao.source_id} (existingId=${decision.existingId})`);
-        const res = await markCancelledAOById(decision.existingId, ao);
-        console.log(res.updated ? `✅ CANCEL applied` : `ℹ️ Already cancelled`);
-        return;
-      }
-
-      case 'RECTIFY': {
-        console.log(`📝 RECTIFY AO ${ao.source_id} (existingId=${decision.existingId})`);
-        // sera implémenté plus tard
-        return;
-      }
-
-      default: {
-        const _exhaustive: never = decision;
-        throw new Error(`Unhandled deduplication decision`);
-      }
-    }
-    
-  } catch (error) {
-    // Gestion d'erreur : on log mais on ne fait pas échouer tout le batch
-    console.error(`❌ Erreur lors du traitement de l'AO ${ao.source_id}:`, error);
-    // On ne throw pas pour éviter de casser le flux pour les autres AO
-  }
-}
-
 export const boampFetcherTool = createTool({
   id: 'boamp-fetcher',
   description: 'Récupère les appels d\'offres BOAMP (hors attributions)',
@@ -329,16 +256,15 @@ export const boampFetcherTool = createTool({
     ].join(',');
     
     // ═══════════════════════════════════════════════════════════
-    // 🔄 PAGINATION EXHAUSTIVE AVEC TRAITEMENT EN FLUX
+    // 🔄 PAGINATION EXHAUSTIVE
     // ═══════════════════════════════════════════════════════════
     // Règle d'architecture : Aucun JSON BOAMP brut ne doit traverser le workflow
-    // Chaque record est normalisé puis traité immédiatement (pas de stockage en masse)
+    // Chaque record est normalisé puis retourné au workflow pour traitement
     console.log(`🔗 Fetching BOAMP avec pagination exhaustive...`);
     console.log(`📅 Date cible: ${targetDate}`);
     console.log(`📦 Page size: ${pageSize} (MAX autorisé: 100 par OpenDataSoft)`);
     
     // Tableau pour accumuler les AO normalisés (pour retour au workflow)
-    // Note: Traitement en flux (processAO) + accumulation pour le workflow
     const records: CanonicalAO[] = [];
     let offset = 0;
     let totalCount = 0;
@@ -388,21 +314,17 @@ export const boampFetcherTool = createTool({
       // Récupérer les résultats bruts de cette page
       const pageResults = data.results || [];
       
-      // 🔥 TRAITEMENT EN FLUX : Normalisation puis traitement immédiat
+      // Normalisation et accumulation des AO pour retour au workflow
       for (const rawRecord of pageResults) {
         // Normaliser immédiatement (le record brut devient éligible au GC après)
         const ao = normalizeBoampRecord(rawRecord);
         
-        // Accumuler pour retour au workflow (nécessaire pour les étapes suivantes)
+        // Accumuler pour retour au workflow
         records.push(ao);
-        
-        // Traiter immédiatement (déduplication, analyse, scoring, persistance)
-        await processAO(ao);
         
         fetchedCount++;
         
         // Le rawRecord sort de scope ici → GC OK
-        // Note: l'ao est conservé dans records[] pour le workflow
       }
       
       console.log(`✅ Page ${pageNumber}: ${pageResults.length} AO traités`);
@@ -456,7 +378,7 @@ export const boampFetcherTool = createTool({
     const status = missing > 0 ? 'DEGRADED' : 'COMPLETE';
     
     // Retourner la structure attendue par le workflow
-    // Note: Les AO sont retournés ET traités en flux (pas de perte de données)
+    // Les AO normalisés sont retournés pour traitement par le workflow
     return {
       source: 'BOAMP',
       query: { 
