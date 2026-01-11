@@ -1,0 +1,83 @@
+name: AO Veille Quotidienne
+
+on:
+  schedule:
+    # Tous les jours à 6h00 UTC (7h Paris hiver, 8h Paris été)
+    - cron: '0 6 * * *'
+  
+  # Permet de déclencher manuellement le workflow pour tester
+  workflow_dispatch:
+    inputs:
+      since:
+        description: 'Date de début (YYYY-MM-DD) - laissez vide pour hier'
+        required: false
+        type: string
+      clientId:
+        description: 'ID du client (laissez vide pour utiliser le défaut)'
+        required: false
+        type: string
+
+jobs:
+  run-ao-veille:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📅 Calculer la date de recherche
+        id: date
+        run: |
+          if [ -n "${{ github.event.inputs.since }}" ]; then
+            echo "since=${{ github.event.inputs.since }}" >> $GITHUB_OUTPUT
+          else
+            echo "since=$(date -d '1 day ago' '+%Y-%m-%d')" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: 🚀 Déclencher le workflow AO Veille
+        id: trigger
+        run: |
+          CLIENT_ID="${{ github.event.inputs.clientId }}"
+          if [ -z "$CLIENT_ID" ]; then
+            CLIENT_ID="${{ secrets.BALTHAZAR_CLIENT_ID }}"
+          fi
+          
+          echo "🔍 Lancement de la veille pour le client: $CLIENT_ID"
+          echo "📅 Depuis: ${{ steps.date.outputs.since }}"
+          
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"inputData\": {
+                \"clientId\": \"$CLIENT_ID\",
+                \"since\": \"${{ steps.date.outputs.since }}\"
+              }
+            }" \
+            ${{ secrets.MASTRA_CLOUD_URL }}/api/workflows/ao-veille-workflow/run)
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          
+          echo "response=$BODY" >> $GITHUB_OUTPUT
+          echo "http_code=$HTTP_CODE" >> $GITHUB_OUTPUT
+          
+          echo "📊 Code HTTP: $HTTP_CODE"
+          echo "📦 Réponse: $BODY"
+      
+      - name: ✅ Vérifier le succès
+        if: steps.trigger.outputs.http_code == '200'
+        run: |
+          echo "✅ Workflow exécuté avec succès !"
+          echo "📊 Résultat: ${{ steps.trigger.outputs.response }}"
+      
+      - name: ❌ Gérer l'échec
+        if: steps.trigger.outputs.http_code != '200'
+        run: |
+          echo "❌ Le workflow a échoué avec le code HTTP: ${{ steps.trigger.outputs.http_code }}"
+          echo "📦 Réponse: ${{ steps.trigger.outputs.response }}"
+          exit 1
+      
+      - name: 📧 Notifier en cas d'échec
+        if: failure()
+        run: |
+          echo "⚠️ ATTENTION: Le workflow AO Veille a échoué !"
+          echo "Vérifiez les logs ci-dessus pour plus de détails."
+          # TODO: Ajouter une notification email/Slack ici si nécessaire
+

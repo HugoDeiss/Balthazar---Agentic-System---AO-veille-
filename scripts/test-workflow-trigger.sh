@@ -56,7 +56,7 @@ echo ""
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
   -H "Content-Type: application/json" \
   -d "$PAYLOAD" \
-  "$MASTRA_CLOUD_URL/api/workflows/ao-veille-workflow/run")
+  "$MASTRA_CLOUD_URL/api/workflows/aoVeilleWorkflow/run")
 
 # Extraire le code HTTP et le body
 HTTP_CODE=$(echo "$RESPONSE" | tail -n1)

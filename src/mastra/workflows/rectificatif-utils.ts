@@ -2,6 +2,7 @@
 // UTILITAIRES : Détection et traitement des rectificatifs BOAMP
 // ════════════════════════════════════════════════════════════════
 
+import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(

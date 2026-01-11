@@ -1,12 +1,14 @@
 import { createWorkflow, createStep } from '@mastra/core/workflows';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
-import { boampFetcherTool } from '../tools/boamp-fetcher';
+import { boampFetcherTool, type CanonicalAO } from '../tools/boamp-fetcher';
 import {
   isRectification,
   findOriginalAO,
   detectSubstantialChanges
 } from './rectificatif-utils';
+import { checkBatchAlreadyAnalyzed } from '../../persistence/ao-persistence';
+import { scheduleRetry } from '../../utils/retry-scheduler';
 
 // ──────────────────────────────────────────────────
 // SUPABASE CLIENT
@@ -38,6 +40,28 @@ function getDaysRemaining(deadline: string): number {
   const today = new Date();
   const diffTime = deadlineDate.getTime() - today.getTime();
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
+/** Convertit un CanonicalAO (structure imbriquée) vers le format plat aoSchema */
+function canonicalAOToFlatSchema(canonicalAO: CanonicalAO): z.infer<typeof aoSchema> {
+  return {
+    source: canonicalAO.source,
+    source_id: canonicalAO.source_id,
+    title: canonicalAO.identity.title,
+    description: canonicalAO.content.description,
+    keywords: canonicalAO.content.keywords,
+    acheteur: canonicalAO.identity.acheteur || undefined,
+    acheteur_email: canonicalAO.metadata.acheteur_email || undefined,
+    budget_min: null, // Non disponible dans CanonicalAO pour l'instant
+    budget_max: null, // Non disponible dans CanonicalAO pour l'instant
+    deadline: canonicalAO.lifecycle.deadline || undefined,
+    publication_date: canonicalAO.lifecycle.publication_date,
+    type_marche: canonicalAO.classification.type_marche || undefined,
+    region: canonicalAO.identity.region,
+    url_ao: canonicalAO.identity.url || undefined,
+    etat: canonicalAO.lifecycle.etat || undefined,
+    raw_json: canonicalAO // Conserver l'objet complet pour référence
+  };
 }
 
 // ──────────────────────────────────────────────────
@@ -98,26 +122,25 @@ const fetchAndPrequalifyStep = createStep({
     prequalified: z.array(aoSchema),
     client: clientSchema
   }),
-  execute: async ({ inputData, runtimeContext }) => {
+  execute: async ({ inputData, requestContext }) => {
     const client = await getClient(inputData.clientId);
     
     // 1️⃣ Fetch BOAMP (filtrage structurel côté API)
     const boampData = await boampFetcherTool.execute!({
-      context: {
-        since: inputData.since, // Optionnel, default = veille
-        typeMarche: client.preferences.typeMarche,
-        pageSize: 200 // Nombre d'AO à récupérer par page
-      },
-      runtimeContext
+      since: inputData.since, // Optionnel, default = veille
+      typeMarche: client.preferences.typeMarche,
+      pageSize: 200 // Nombre d'AO à récupérer par page
+    }, {
+      requestContext
     }) as {
       source: string;
-      query: any;
+      query: { since?: string; typeMarche: string; pageSize: number; minDeadline: string };
       total_count: number;
       fetched: number;
       missing: number;
       missing_ratio: number;
       status: string;
-      records: any[];
+      records: CanonicalAO[];
     };
     
     console.log(`📥 BOAMP Fetch: ${boampData.records.length} AO récupérés`);
@@ -131,14 +154,23 @@ const fetchAndPrequalifyStep = createStep({
       console.warn(`⏰ Retry automatique planifié dans 60 minutes`);
       console.warn(`⏰ Date cible pour retry: ${boampData.query.since}`);
       
-      // Planifier un retry dans 60 minutes
-      // Note: Cette information sera utilisée par un système externe (cron, queue, etc.)
-      // Pour l'instant, on log simplement l'intention
-      // TODO: Implémenter le mécanisme de retry (workflow schedulé, cron job, etc.)
+      try {
+        const targetDate = boampData.query.since || new Date().toISOString().split('T')[0];
+        scheduleRetry(
+          inputData.clientId,
+          targetDate,
+          60, // 60 minutes
+          `Incohérence détectée: ${boampData.missing} AO manquants (${(boampData.missing_ratio * 100).toFixed(2)}%)`
+        );
+        console.log(`✅ Retry planifié dans 60 minutes pour ${inputData.clientId}/${targetDate}`);
+      } catch (error) {
+        console.error('⚠️ Erreur planification retry:', error);
+        // Ne pas faire échouer le workflow si la planification échoue
+      }
     }
     
-    // 3️⃣ PASSTHROUGH : Tous les AO passent (filtrage métier = IA)
-    const prequalified = boampData.records;
+    // 3️⃣ TRANSFORMATION : Convertir CanonicalAO[] (structure imbriquée) vers format plat aoSchema
+    const prequalified = boampData.records.map(canonicalAOToFlatSchema);
     
     console.log(`✅ Collecte: ${prequalified.length} AO transmis à l'analyse`);
     
@@ -337,6 +369,104 @@ const detectRectificationStep = createStep({
 });
 
 // ──────────────────────────────────────────────────
+// STEP 1d: FILTRAGE DES AO DÉJÀ ANALYSÉS (déduplication retry)
+// ──────────────────────────────────────────────────
+// Placé APRÈS detectRectificationStep et AVANT keywordMatchingStep
+// Objectif : éviter le keyword matching inutile pour les AO déjà analysés
+const filterAlreadyAnalyzedStep = createStep({
+  id: 'filter-already-analyzed',
+  inputSchema: z.object({
+    toAnalyze: z.array(aoSchema.extend({
+      _isRectification: z.boolean().optional(),
+      _originalAO: z.any().optional(),
+      _changes: z.any().optional()
+    })),
+    rectificationsMineurs: z.number(),
+    rectificationsSubstantiels: z.number(),
+    client: clientSchema
+  }),
+  outputSchema: z.object({
+    toAnalyze: z.array(aoSchema.extend({
+      _isRectification: z.boolean().optional(),
+      _originalAO: z.any().optional(),
+      _changes: z.any().optional()
+    })),
+    rectificationsMineurs: z.number(),
+    rectificationsSubstantiels: z.number(),
+    skipped: z.number(),
+    client: clientSchema
+  }),
+  execute: async ({ inputData }) => {
+    const { toAnalyze, rectificationsMineurs, rectificationsSubstantiels, client } = inputData;
+    
+    console.log(`🔍 Vérification des AO déjà analysés (${toAnalyze.length} AO)...`);
+    
+    // Vérification en batch pour optimiser (une seule requête DB)
+    const alreadyAnalyzedMap = await checkBatchAlreadyAnalyzed(
+      toAnalyze.map(ao => ({
+        source: ao.source || 'BOAMP',
+        source_id: ao.source_id
+      }))
+    );
+    
+    const filteredAOs: typeof toAnalyze = [];
+    let skipped = 0;
+    
+    for (const ao of toAnalyze) {
+      const isAlreadyAnalyzed = alreadyAnalyzedMap.get(ao.source_id) || false;
+      
+      // ═══════════════════════════════════════════════════════
+      // EXCEPTIONS : Ces AO doivent passer même s'ils sont analysés
+      // ═══════════════════════════════════════════════════════
+      
+      // 1. Rectificatif substantiel → TOUJOURS re-analysé (changement important)
+      if (ao._isRectification && ao._changes?.isSubstantial === true) {
+        console.log(`📝 Rectificatif substantiel ${ao.source_id} → re-analyse requise`);
+        filteredAOs.push(ao);
+        continue;
+      }
+      
+      // 2. AO annulé → doit être géré par handleCancellationsStep
+      // Mais si déjà analysé puis annulé, on le skip ici
+      if (ao.etat === 'AVIS_ANNULE' && isAlreadyAnalyzed) {
+        // L'annulation sera gérée en DB mais pas besoin de re-analyse IA
+        skipped++;
+        console.log(`⏭️ SKIP AO annulé ${ao.source_id} (déjà analysé)`);
+        continue;
+      }
+      
+      // ═══════════════════════════════════════════════════════
+      // CAS STANDARD : Filtrer si déjà analysé
+      // ═══════════════════════════════════════════════════════
+      if (isAlreadyAnalyzed) {
+        skipped++;
+        console.log(`⏭️ SKIP AO ${ao.source_id} (déjà analysé)`);
+        continue;
+      }
+      
+      // Nouveau AO → à analyser
+      filteredAOs.push(ao);
+    }
+    
+    console.log(`✅ Filtrage terminé:`);
+    console.log(`   📊 ${toAnalyze.length} AO vérifiés`);
+    console.log(`   ⏭️ ${skipped} AO déjà analysés (sautés)`);
+    console.log(`   🆕 ${filteredAOs.length} AO nouveaux à analyser`);
+    if (skipped > 0) {
+      console.log(`   💰 Économie: ${skipped} × (keyword matching + IA) évités`);
+    }
+    
+    return {
+      toAnalyze: filteredAOs,
+      rectificationsMineurs,
+      rectificationsSubstantiels,
+      skipped,
+      client
+    };
+  }
+});
+
+// ──────────────────────────────────────────────────
 // STEP 2a: PRÉ-SCORING MOTS-CLÉS (gratuit, non bloquant)
 // ──────────────────────────────────────────────────
 const keywordMatchingStep = createStep({
@@ -349,6 +479,7 @@ const keywordMatchingStep = createStep({
     })),
     rectificationsMineurs: z.number(),
     rectificationsSubstantiels: z.number(),
+    skipped: z.number().optional(),
     client: clientSchema
   }),
   outputSchema: z.object({
@@ -432,6 +563,7 @@ const saveResultsStep = createStep({
       total: z.number(),
       analysed: z.number(),
       cancelled: z.number(),
+      skipped: z.number().optional(),
       high: z.number(),
       medium: z.number(),
       low: z.number(),
@@ -1286,6 +1418,7 @@ const aggregateResultsStep = createStep({
       total: z.number(),
       analysed: z.number(),
       cancelled: z.number(),
+      skipped: z.number().optional(),
       high: z.number(),
       medium: z.number(),
       low: z.number(),
@@ -1349,6 +1482,8 @@ const aggregateResultsStep = createStep({
     console.log(`   📊 Total: ${total} AO traités`);
     console.log(`   ✅ Analysés: ${analysed} AO`);
     console.log(`   ❌ Annulés: ${cancelledCount} AO`);
+    // Note: Les skipped sont déjà loggés dans filterAlreadyAnalyzedStep
+    // car ils ne passent pas par le foreach, donc pas disponibles ici
     console.log(`   🔥 HIGH: ${high.length} AO`);
     console.log(`   🟡 MEDIUM: ${medium.length} AO`);
     console.log(`   🟢 LOW: ${low.length} AO`);
@@ -1367,6 +1502,7 @@ const aggregateResultsStep = createStep({
         total,
         analysed,
         cancelled: cancelledCount,
+        skipped: 0, // Les skipped sont loggés dans filterAlreadyAnalyzedStep, pas disponibles ici
         high: high.length,
         medium: medium.length,
         low: low.length,
@@ -1385,7 +1521,7 @@ const aggregateResultsStep = createStep({
 // WORKFLOW
 // ──────────────────────────────────────────────────
 export const aoVeilleWorkflow = createWorkflow({
-  id: 'ao-veille-workflow',
+  id: 'aoVeilleWorkflow',
   inputSchema: z.object({
     clientId: z.string(),
     since: z.string().optional()
@@ -1405,6 +1541,7 @@ export const aoVeilleWorkflow = createWorkflow({
   .then(fetchAndPrequalifyStep)
   .then(handleCancellationsStep)      // 🆕 STEP 1b: Gestion annulations
   .then(detectRectificationStep)      // 🆕 STEP 1c: Détection rectificatifs
+  .then(filterAlreadyAnalyzedStep)    // 🆕 STEP 1d: Filtrage AO déjà analysés
   .then(keywordMatchingStep)
   
   // ═══════════════════════════════════════════════════════

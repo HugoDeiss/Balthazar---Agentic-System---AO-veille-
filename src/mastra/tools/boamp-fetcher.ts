@@ -251,8 +251,8 @@ export const boampFetcherTool = createTool({
       .describe('Taille de page pour pagination (MAX autorisé: 100 par OpenDataSoft)')
   }),
   
-  execute: async ({ context }) => {
-    const { since, typeMarche, pageSize: rawPageSize } = context;
+  execute: async (inputData, context) => {
+    const { since, typeMarche, pageSize: rawPageSize } = inputData;
     
     // Forcer le maximum à 100 (limite OpenDataSoft)
     const pageSize = Math.min(rawPageSize || 100, 100);
@@ -337,7 +337,9 @@ export const boampFetcherTool = createTool({
     console.log(`📅 Date cible: ${targetDate}`);
     console.log(`📦 Page size: ${pageSize} (MAX autorisé: 100 par OpenDataSoft)`);
     
-    // Pas de tableau global : traitement en flux (1 AO à la fois)
+    // Tableau pour accumuler les AO normalisés (pour retour au workflow)
+    // Note: Traitement en flux (processAO) + accumulation pour le workflow
+    const records: CanonicalAO[] = [];
     let offset = 0;
     let totalCount = 0;
     let pageNumber = 1;
@@ -391,13 +393,16 @@ export const boampFetcherTool = createTool({
         // Normaliser immédiatement (le record brut devient éligible au GC après)
         const ao = normalizeBoampRecord(rawRecord);
         
+        // Accumuler pour retour au workflow (nécessaire pour les étapes suivantes)
+        records.push(ao);
+        
         // Traiter immédiatement (déduplication, analyse, scoring, persistance)
         await processAO(ao);
         
         fetchedCount++;
         
-        // Le rawRecord et l'ao sortent de scope ici → GC OK
-        // Zéro accumulation mémoire, zéro risque OOM
+        // Le rawRecord sort de scope ici → GC OK
+        // Note: l'ao est conservé dans records[] pour le workflow
       }
       
       console.log(`✅ Page ${pageNumber}: ${pageResults.length} AO traités`);
@@ -447,16 +452,11 @@ export const boampFetcherTool = createTool({
     // Calcul précis du nombre de pages réellement fetchées
     const pagesFetched = Math.ceil(fetchedCount / pageSize);
     
-    const fetchReport = {
-      expected: totalCount,
-      fetched: fetchedCount,
-      missing: missing,
-      missing_ratio: missingRatio,
-      pages: pagesFetched
-    };
+    // Déterminer le statut basé sur missing
+    const status = missing > 0 ? 'DEGRADED' : 'COMPLETE';
     
-    // Le fetcher ne retourne plus les AO, seulement un rapport
-    // Logique : le fetcher constate, le métier agit, la DB se souvient
+    // Retourner la structure attendue par le workflow
+    // Note: Les AO sont retournés ET traités en flux (pas de perte de données)
     return {
       source: 'BOAMP',
       query: { 
@@ -465,7 +465,12 @@ export const boampFetcherTool = createTool({
         pageSize,
         minDeadline 
       },
-      report: fetchReport
+      total_count: totalCount,
+      fetched: fetchedCount,
+      missing: missing,
+      missing_ratio: missingRatio,
+      status: status,
+      records: records // Tableau des AO normalisés pour le workflow
     };
   }
 });

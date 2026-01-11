@@ -3,6 +3,8 @@
 // SCRIPT DE TEST : Simulation d'un rectificatif BOAMP
 // ════════════════════════════════════════════════════════════════
 
+import 'dotenv/config';
+import * as readline from 'readline';
 import { createClient } from '@supabase/supabase-js';
 import {
   isRectification,
@@ -84,21 +86,26 @@ const TEST_RECTIFICATIF_SUBSTANTIEL = {
 const TEST_RECTIFICATIF_MINEUR = {
   source: 'BOAMP',
   source_id: 'TEST-2025-002-RECT',
-  title: 'Fourniture de matériel informatique',
-  description: 'Achat de PC portables',
-  acheteur: 'Mairie de Paris',
-  acheteur_email: 'marches@paris.fr',
-  budget_max: 50000,
-  deadline: '2025-02-18T23:59:59Z', // +3 jours seulement
+  title: 'Mission de conseil en stratégie digitale', // Identique à l'original
+  description: 'Accompagnement à la transformation numérique (correction de date)',
+  acheteur: 'Région Île-de-France', // Identique à l'original
+  acheteur_email: 'marches@iledefrance.fr', // Identique à l'original
+  budget_max: 100000, // Identique à l'original (pas de changement)
+  deadline: '2025-02-18T23:59:59Z', // +3 jours seulement (< 7 jours, OK pour mineur)
   publication_date: '2025-01-20T10:00:00Z',
-  type_marche: 'FOURNITURES',
-  region: 'Île-de-France',
+  type_marche: 'SERVICES', // Identique à l'original
+  region: 'Île-de-France', // Identique à l'original
   url_ao: 'https://www.boamp.fr/avis/TEST-2025-002-RECT',
   raw_json: {
     idweb: 'TEST-2025-002-RECT',
     nature_categorise: 'avis_rectificatif',
     annonce_lie: 'TEST-2025-002',
-    donnees: {}
+    donnees: {
+      CONDITION_PARTICIPATION: {
+        CAP_ECO: 'CA minimum : 500k€', // Identique à l'original
+        CAP_TECH: '3 références similaires' // Identique à l'original
+      }
+    }
   }
 };
 
@@ -310,18 +317,18 @@ async function main() {
     await testFluxComplet();
     
     // Nettoyage (optionnel)
-    const readline = require('readline').createInterface({
+    const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout
     });
     
-    readline.question('\n❓ Supprimer les données de test ? (y/N) ', async (answer: string) => {
+    rl.question('\n❓ Supprimer les données de test ? (y/N) ', async (answer: string) => {
       if (answer.toLowerCase() === 'y') {
         await nettoyageTests();
       }
       
       console.log('\n✅ Tests terminés !');
-      readline.close();
+      rl.close();
       process.exit(0);
     });
     
@@ -332,8 +339,9 @@ async function main() {
 }
 
 // Exécuter si appelé directement
-if (require.main === module) {
-  main();
-}
+main().catch((error: Error) => {
+  console.error('❌ Erreur fatale:', error);
+  process.exit(1);
+});
 
 

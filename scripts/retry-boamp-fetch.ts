@@ -26,17 +26,19 @@ async function retryBoampFetch(clientId: string, date: string) {
   console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
   
   try {
-    // Récupérer le workflow
-    const workflow = mastra.getWorkflow('ao-veille-workflow');
+    // Récupérer le workflow (méthode recommandée par Mastra)
+    const workflow = mastra.getWorkflow('aoVeilleWorkflow');
     
     if (!workflow) {
-      throw new Error('Workflow ao-veille-workflow not found');
+      throw new Error('Workflow aoVeilleWorkflow not found');
     }
     
-    // Exécuter le workflow avec la date spécifique
+    // Utiliser l'API Mastra : createRunAsync() + start()
+    // Cela wire automatiquement logger, telemetry, storage, agents, etc.
     console.log(`🚀 Lancement du workflow...`);
-    const result = await workflow.execute({
-      triggerData: {
+    const run = await workflow.createRunAsync();
+    const result = await run.start({
+      inputData: {
         clientId,
         since: date
       }

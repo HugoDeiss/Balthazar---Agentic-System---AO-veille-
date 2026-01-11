@@ -626,7 +626,7 @@ Réponds toujours en JSON structuré.
 
 ```
 http://localhost:3000
-→ Workflows → ao-veille-workflow
+→ Workflows → aoVeilleWorkflow
 → Execute
 ```
 
@@ -635,10 +635,16 @@ http://localhost:3000
 ```typescript
 import { mastra } from './src/mastra';
 
-const workflow = mastra.getWorkflow('ao-veille-workflow');
+const workflow = mastra.getWorkflow('aoVeilleWorkflow');
 
-const result = await workflow.execute({
-  triggerData: {
+if (!workflow) {
+  throw new Error('Workflow aoVeilleWorkflow not found');
+}
+
+// Utiliser l'API Mastra : createRunAsync() + start()
+const run = await workflow.createRunAsync();
+const result = await run.start({
+  inputData: {
     clientId: 'balthazar',
     since: '2025-12-20' // Optionnel
   }

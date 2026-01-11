@@ -117,7 +117,7 @@ Le serveur Mastra démarre sur `http://localhost:3000`
 ### Test Manuel dans Mastra Studio
 
 1. Ouvrir `http://localhost:3000`
-2. Naviguer vers "Workflows" → "ao-veille-workflow"
+2. Naviguer vers "Workflows" → "aoVeilleWorkflow"
 3. Exécuter avec :
 
 ```json
@@ -132,10 +132,17 @@ Le serveur Mastra démarre sur `http://localhost:3000`
 ```typescript
 import { mastra } from './src/mastra';
 
-const workflow = mastra.getWorkflow('ao-veille-workflow');
+const workflow = mastra.getWorkflow('aoVeilleWorkflow');
 
-const result = await workflow.execute({
-  triggerData: {
+if (!workflow) {
+  throw new Error('Workflow aoVeilleWorkflow not found');
+}
+
+// Utiliser l'API Mastra : createRunAsync() + start()
+// Cela wire automatiquement logger, telemetry, storage, agents, etc.
+const run = await workflow.createRunAsync();
+const result = await run.start({
+  inputData: {
     clientId: 'balthazar',
     since: '2025-12-20' // Optionnel, default = veille
   }

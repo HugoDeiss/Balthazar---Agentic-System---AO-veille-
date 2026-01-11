@@ -4,4 +4,4 @@
  * This module exports all tools used by the tender monitoring agents.
  */
 
-export { boampFetcherTool } from "./boamp-fetcher";
+export { boampFetcherTool, type CanonicalAO } from "./boamp-fetcher";
