@@ -660,7 +660,10 @@ const saveResultsStep = createStep({
           rectification_changes: {
             changes: ao._changes.changes,
             detected_at: new Date().toISOString()
-          }
+          },
+          
+          // 🆕 Stocker annonce_lie pour recherche optimisée
+          annonce_lie: ao.raw_json?.lifecycle?.annonce_lie || ao.raw_json?.annonce_lie || null
         }).eq('id', ao._originalAO.id);
         
         continue; // Passer à l'AO suivant
@@ -720,7 +723,10 @@ const saveResultsStep = createStep({
         client_id: client.id,
         raw_json: ao.raw_json,
         status: 'analyzed',
-        analyzed_at: new Date().toISOString()
+        analyzed_at: new Date().toISOString(),
+        
+        // 🆕 Stocker annonce_lie pour recherche optimisée
+        annonce_lie: ao.raw_json?.lifecycle?.annonce_lie || ao.raw_json?.annonce_lie || null
       }, {
         onConflict: 'source_id'
       });

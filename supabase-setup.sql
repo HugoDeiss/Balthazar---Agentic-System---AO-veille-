@@ -137,7 +137,8 @@ CREATE TABLE IF NOT EXISTS appels_offres (
   -- ============================================
   
   boamp_id TEXT,                     -- ID BOAMP original (si différent de source_id)
-  normalized_id TEXT                 -- ID normalisé pour déduplication avancée
+  normalized_id TEXT,                -- ID normalisé pour déduplication avancée
+  annonce_lie TEXT                   -- ID de l'annonce originale (pour rectificatifs)
 );
 
 -- ============================================
@@ -163,6 +164,11 @@ ON appels_offres(deadline);
 -- Index composite pour les requêtes fréquentes
 CREATE INDEX IF NOT EXISTS idx_appels_offres_client_priority_date 
 ON appels_offres(client_id, priority, analyzed_at DESC);
+
+-- Index sur annonce_lie pour recherche rapide de l'AO original (rectificatifs)
+CREATE INDEX IF NOT EXISTS idx_appels_offres_annonce_lie 
+ON appels_offres(annonce_lie) 
+WHERE annonce_lie IS NOT NULL;
 
 -- ============================================
 -- 4. FONCTION DE MISE À JOUR AUTO updated_at

@@ -66,14 +66,31 @@ export async function findOriginalAO(rectificationAO: any): Promise<any | null> 
   console.log(`🔍 Recherche de l'AO original pour rectificatif: ${rectificationAO.title}`);
   
   // ────────────────────────────────────────────────────────────────
-  // Stratégie 1 : Via annonce_lie (ID BOAMP de l'original)
+  // STRATÉGIE 1 : Via annonce_lie (OPTIMISÉ - 1 requête directe)
   // ────────────────────────────────────────────────────────────────
-  if (rectificationAO.raw_json?.annonce_lie) {
-    const annonceId = rectificationAO.raw_json.annonce_lie;
-    console.log(`  → Tentative 1 : Recherche par annonce_lie = "${annonceId}"`);
+  const annonceId = rectificationAO.raw_json?.lifecycle?.annonce_lie 
+    || rectificationAO.raw_json?.annonce_lie 
+    || null;
+  
+  if (annonceId) {
+    console.log(`  → Tentative 1 : Recherche directe par annonce_lie = "${annonceId}"`);
     
-    // Essayer avec source_id (car annonce_lie contient l'idweb)
-    const { data: bySourceId, error: error1 } = await supabase
+    // 🚀 OPTIMISATION : Requête directe sur la colonne annonce_lie
+    const { data: byAnnonceLie, error: error1 } = await supabase
+      .from('appels_offres')
+      .select('*')
+      .eq('annonce_lie', annonceId)
+      .order('analyzed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    if (byAnnonceLie) {
+      console.log(`  ✅ Trouvé via colonne annonce_lie (optimisé)`);
+      return byAnnonceLie;
+    }
+    
+    // Fallback : si pas trouvé via colonne (migration progressive), essayer source_id
+    const { data: bySourceId, error: error2 } = await supabase
       .from('appels_offres')
       .select('*')
       .eq('source_id', annonceId)
@@ -82,22 +99,8 @@ export async function findOriginalAO(rectificationAO: any): Promise<any | null> 
       .maybeSingle();
     
     if (bySourceId) {
-      console.log(`  ✅ Trouvé via source_id`);
+      console.log(`  ✅ Trouvé via source_id (fallback)`);
       return bySourceId;
-    }
-    
-    // Essayer avec boamp_id
-    const { data: byBoampId, error: error2 } = await supabase
-      .from('appels_offres')
-      .select('*')
-      .eq('boamp_id', annonceId)
-      .order('analyzed_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    
-    if (byBoampId) {
-      console.log(`  ✅ Trouvé via boamp_id`);
-      return byBoampId;
     }
     
     console.log(`  ❌ Non trouvé via annonce_lie`);
