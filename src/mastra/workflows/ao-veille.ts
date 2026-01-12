@@ -9,7 +9,7 @@ import {
 } from './rectificatif-utils';
 import { checkBatchAlreadyAnalyzed } from '../../persistence/ao-persistence';
 import { scheduleRetry } from '../../utils/retry-scheduler';
-import { calculateKeywordScore } from '../../utils/balthazar-keywords';
+import { calculateKeywordScore, calculateEnhancedKeywordScore, shouldSkipLLM } from '../../utils/balthazar-keywords';
 
 // ──────────────────────────────────────────────────
 // SUPABASE CLIENT
@@ -489,6 +489,8 @@ const keywordMatchingStep = createStep({
       matchedKeywords: z.array(z.string()),
       keywordDetails: z.any().optional(),
       _shouldSkipLLM: z.boolean().optional(),
+      _skipLLMPriority: z.enum(['SKIP', 'LOW', 'MEDIUM', 'HIGH']).optional(),
+      _skipLLMReason: z.string().optional(),
       keywordSignals: z.record(z.boolean()).optional(),
       _isRectification: z.boolean().optional(),
       _originalAO: z.any().optional(),
@@ -503,18 +505,21 @@ const keywordMatchingStep = createStep({
     
     const keywordMatched = prequalified.map(ao => {
       // Utiliser la nouvelle fonction de scoring
-      const scoreResult = calculateKeywordScore(
+      const baseScoreResult = calculateKeywordScore(
         ao.title,
         ao.description,
         ao.keywords,
         ao.acheteur
       );
       
-      // Convertir score 0-100 → 0-1 pour compatibilité avec score final actuel
-      const keywordScore = scoreResult.score / 100;
+      // Appliquer bonus/malus métier
+      const enhancedScoreResult = calculateEnhancedKeywordScore(ao, baseScoreResult);
       
-      // Signal pour skip LLM si score trop faible (économie de coûts)
-      const shouldSkipLLM = scoreResult.score < 30 || scoreResult.red_flags_detected.length > 0;
+      // Décision skip LLM intelligente
+      const skipDecision = shouldSkipLLM(enhancedScoreResult);
+      
+      // Convertir score 0-100 → 0-1 pour compatibilité avec score final actuel
+      const keywordScore = enhancedScoreResult.score / 100;
       
       // Analyse des critères d'attribution pour scorer la compétitivité (conservé pour compatibilité)
       const criteres = ao.raw_json?.metadata?.criteres || ao.raw_json?.criteres || null;
@@ -522,9 +527,11 @@ const keywordMatchingStep = createStep({
       return {
         ...ao,
         keywordScore, // 0-1 (compatible avec workflow actuel)
-        matchedKeywords: scoreResult.allMatches, // Pour compatibilité
-        keywordDetails: scoreResult, // Détails complets pour utilisation future
-        _shouldSkipLLM: shouldSkipLLM, // Metadata pour optimisation
+        matchedKeywords: enhancedScoreResult.allMatches, // Pour compatibilité
+        keywordDetails: enhancedScoreResult, // Détails complets pour utilisation future
+        _shouldSkipLLM: skipDecision.skip, // Metadata pour optimisation
+        _skipLLMPriority: skipDecision.priority, // Nouveau
+        _skipLLMReason: skipDecision.reason,     // Nouveau
         // Préserver les métadonnées de rectificatif
         _isRectification: ao._isRectification,
         _originalAO: ao._originalAO,
@@ -541,7 +548,15 @@ const keywordMatchingStep = createStep({
     console.log(`✅ Keyword matching: ${keywordMatched.length} AO`);
     console.log(`   📊 Score moyen: ${avgScore}/100`);
     if (skippedLLMCount > 0) {
-      console.log(`   ⚡ ${skippedLLMCount} AO signalés pour skip LLM (score < 30 ou red flags)`);
+      const skipReasons = keywordMatched
+        .filter(ao => ao._shouldSkipLLM)
+        .reduce((acc, ao) => {
+          const reason = (ao as any)._skipLLMReason || 'unknown';
+          acc[reason] = (acc[reason] || 0) + 1;
+          return acc;
+        }, {} as Record<string, number>);
+      console.log(`   ⚡ ${skippedLLMCount} AO signalés pour skip LLM`);
+      console.log(`   📋 Raisons: ${JSON.stringify(skipReasons)}`);
     }
     
     return { keywordMatched, client };
@@ -914,6 +929,8 @@ const handleSkipLLMAOStep = createStep({
       matchedKeywords: z.array(z.string()),
       keywordDetails: z.any().optional(),
       _shouldSkipLLM: z.boolean().optional(),
+      _skipLLMPriority: z.enum(['SKIP', 'LOW', 'MEDIUM', 'HIGH']).optional(),
+      _skipLLMReason: z.string().optional(),
       _isRectification: z.boolean().optional(),
       _originalAO: z.any().optional(),
       _changes: z.any().optional()
@@ -949,6 +966,9 @@ const handleSkipLLMAOStep = createStep({
     const keywordDetails = (ao as any).keywordDetails;
     if (keywordDetails) {
       console.log(`   Score keywords: ${keywordDetails.score}/100 (${keywordDetails.confidence})`);
+      const skipReason = (ao as any)._skipLLMReason || 'unknown';
+      const skipPriority = (ao as any)._skipLLMPriority || 'SKIP';
+      console.log(`   Raison skip: ${skipReason} (priorité: ${skipPriority})`);
       if (keywordDetails.red_flags_detected && keywordDetails.red_flags_detected.length > 0) {
         console.log(`   ⚠️ Red flags: ${keywordDetails.red_flags_detected.join(', ')}`);
       }
