@@ -400,7 +400,7 @@ export const balthazarLexicon = {
     ]
   },
 
-  // RED FLAGS ÉLIMINATOIRES (détection pour signaler, pas pour bloquer)
+  // RED FLAGS (détection pour signaler, pas pour bloquer)
   red_flags: {
     keywords: [
       // Existants
@@ -412,7 +412,6 @@ export const balthazarLexicon = {
       "actuariat", "actuaire",
       "formation catalogue", "organisme de formation",
       "nettoyage", "entretien", "maintenance technique",
-      // Ajouts recommandés
       "travaux publics", "génie civil", "genie civil",
       "voirie", "vrd", "chaussée", "chaussee",
       "étude de sol", "etude de sol",
@@ -451,7 +450,6 @@ export const balthazarLexicon = {
       /d(é|e)veloppement\s+logiciel/i,
       /actuari(at|el)/i,
       /formation\s+catalogue/i,
-      // Ajouts recommandés
       /march(é|e)\s+de\s+fourniture/i,
       /location\s+de\s+mat(é|e)riel/i,
       /prestation\s+de\s+nettoyage/i,

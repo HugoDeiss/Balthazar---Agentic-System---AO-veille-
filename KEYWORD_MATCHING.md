@@ -31,6 +31,8 @@ shouldSkipLLM (décision intelligente)
 ### 1. Lexique Balthazar (`balthazarLexicon`)
 
 #### Secteurs cibles (pondération 3x-4x)
+- **Plafond total secteurs** : 50 points
+- **Max par catégorie** : 15 points (18 points pour entreprise_mission)
 - **mobilite** (weight: 3) : SNCF, RATP, IDFM, transports publics, mobilité urbaine
 - **assurance** (weight: 3) : MAIF, Groupama, mutuelles, protection sociale
 - **energie** (weight: 3) : EDF, Engie, transition énergétique, réseaux
@@ -38,6 +40,8 @@ shouldSkipLLM (décision intelligente)
 - **entreprise_mission** (weight: 4) : Société à mission, raison d'être (cœur métier Balthazar)
 
 #### Expertises métier (pondération 2x)
+- **Plafond total expertises** : 40 points
+- **Max par catégorie** : 10 points
 - **strategie** : Plan stratégique, diagnostic, vision
 - **transformation** : Conduite du changement, modernisation
 - **raison_etre** : Raison d'être, société à mission
@@ -50,6 +54,7 @@ shouldSkipLLM (décision intelligente)
 - **strategie_mobilisation** : Projet d'entreprise, alignement parties prenantes
 
 #### Posture intervention (pondération 1x)
+- **Plafond total posture** : 15 points
 - Méthodologie Balthazar : co-construction, séminaires CODIR/COMEX
 - Livrables typiques : diagnostic stratégique, feuille de route, récit
 - Approche singularité : ADN entreprise, essentiel, conviction
@@ -113,7 +118,8 @@ Applique bonus/malus métier au score de base :
 
 **Bonus** :
 - Client référence Balthazar : +15pts
-- Raison d'être / Société à mission : +10pts
+- Raison d'être (en expertise) : +10pts
+- Entreprise à mission (en secteur) : +5pts (si pas déjà détecté en expertise)
 - Niveau CODIR/COMEX explicite : +8pts
 - Multi-expertises (2+) : +5pts
 
@@ -193,10 +199,9 @@ Utiliser les scripts de test :
 ## Évolutions futures
 
 ### Améliorations possibles
-1. **Machine Learning** : Entraîner un modèle sur AO historiques pour affiner scoring
-2. **Feedback loop** : Ajuster coefficients selon résultats réels Balthazar
-3. **Synonymes** : Ajouter détection de synonymes (ex: "conseil" = "accompagnement")
-4. **Contextes** : Prendre en compte contexte (ex: "formation-action" ≠ "formation catalogue")
+1. **Feedback loop** : Ajuster coefficients selon résultats réels Balthazar
+2. **Synonymes** : Ajouter détection de synonymes (ex: "conseil" = "accompagnement")
+3. **Contextes** : Prendre en compte contexte (ex: "formation-action" ≠ "formation catalogue")
 
 ### Maintenance
 - Mettre à jour lexique régulièrement selon nouveaux secteurs/expertises Balthazar
