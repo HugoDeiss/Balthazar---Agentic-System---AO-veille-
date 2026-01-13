@@ -5,3 +5,4 @@
  */
 
 export { boampFetcherTool, type CanonicalAO } from "./boamp-fetcher";
+export { marchesonlineRSSFetcherTool } from "./marchesonline-rss-fetcher";

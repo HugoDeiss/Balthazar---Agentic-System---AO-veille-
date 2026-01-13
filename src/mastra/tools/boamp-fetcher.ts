@@ -88,6 +88,29 @@ function normalizeBoampRecord(rawRecord: any) {
     console.warn(`Failed to parse donnees for ${fields.idweb}`);
   }
   
+  // ═══════════════════════════════════════════════════════════
+  // 🆕 EXTRACTION UUID PROCÉDURE (contractfolderid)
+  // ═══════════════════════════════════════════════════════════
+  let uuid_procedure: string | null = null;
+  
+  // Priorité 1 : Champ direct contractfolderid (si présent dans fields)
+  if (fields.contractfolderid) {
+    uuid_procedure = fields.contractfolderid;
+  }
+  // Priorité 2 : Chercher dans donnees JSON
+  else if (donneesObj) {
+    // Chercher dans différentes structures possibles
+    uuid_procedure = donneesObj.CONTRACT_FOLDER_ID 
+      || donneesObj.contractfolderid
+      || donneesObj.IDENTIFIANT_PROCEDURE
+      || extractUUIDFromString(JSON.stringify(donneesObj));
+  }
+  // Priorité 3 : Chercher dans description (fallback)
+  if (!uuid_procedure) {
+    const description = donneesObj?.OBJET?.OBJET_COMPLET || fields.objet || '';
+    uuid_procedure = extractUUIDFromString(description);
+  }
+  
   // Calcul de la région depuis le département
   const codeDept = Array.isArray(fields.code_departement)
     ? fields.code_departement[0]
@@ -104,6 +127,9 @@ function normalizeBoampRecord(rawRecord: any) {
     // 🟦 Identité source (niveau racine)
     source: 'BOAMP',
     source_id: fields.idweb,
+    
+    // 🆕 UUID universel pour déduplication cross-platform
+    uuid_procedure: uuid_procedure,
 
     // 🟦 Identity : Identité de l'AO
     identity: {
@@ -146,13 +172,23 @@ function normalizeBoampRecord(rawRecord: any) {
       acheteur_ville: donneesObj?.IDENTITE?.VILLE || null,
       criteres: fields.criteres || null,
       marche_public_simplifie: fields.marche_public_simplifie || null,
-      titulaire: fields.titulaire || null
+      titulaire: fields.titulaire || null,
+      siret: null // SIRET non disponible dans BOAMP directement
     }
   };
   
   // Le record brut n'est plus référencé après ce point
   // Il devient éligible au GC immédiatement
   return ao;
+}
+
+/**
+ * Extrait un UUID v4 depuis une string
+ */
+function extractUUIDFromString(text: string): string | null {
+  const uuidPattern = /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i;
+  const match = text.match(uuidPattern);
+  return match ? match[0].toLowerCase() : null;
 }
 
 // Type explicite pour l'AO canonique
@@ -244,6 +280,9 @@ export const boampFetcherTool = createTool({
       // 🟠 Enrichissement
       'donnees',              // JSON complet
       
+      // 🆕 UUID universel pour déduplication cross-platform
+      'contractfolderid',     // UUID de la procédure (identifiant universel)
+      
       // 🆕 Nouveaux champs pour filtrage et analyse
       'etat',                 // État de l'AO (AVIS_ANNULE, etc.)
       'procedure_libelle',    // Type de procédure (ouvert, restreint, etc.)
@@ -266,6 +305,11 @@ export const boampFetcherTool = createTool({
     
     // Tableau pour accumuler les AO normalisés (pour retour au workflow)
     const records: CanonicalAO[] = [];
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'boamp-fetcher.ts:268',message:'Records array initialized',data:{recordsIsArray:Array.isArray(records),recordsLength:records.length,recordsType:typeof records},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    
     let offset = 0;
     let totalCount = 0;
     let pageNumber = 1;
@@ -377,9 +421,13 @@ export const boampFetcherTool = createTool({
     // Déterminer le statut basé sur missing
     const status = missing > 0 ? 'DEGRADED' : 'COMPLETE';
     
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'boamp-fetcher.ts:421',message:'Before return - check records',data:{recordsIsUndefined:records===undefined,recordsIsNull:records===null,recordsType:typeof records,recordsIsArray:Array.isArray(records),recordsLength:records?.length,totalCount,fetchedCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B,C'})}).catch(()=>{});
+    // #endregion
+    
     // Retourner la structure attendue par le workflow
     // Les AO normalisés sont retournés pour traitement par le workflow
-    return {
+    const returnValue = {
       source: 'BOAMP',
       query: { 
         since: targetDate, 
@@ -394,5 +442,11 @@ export const boampFetcherTool = createTool({
       status: status,
       records: records // Tableau des AO normalisés pour le workflow
     };
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'boamp-fetcher.ts:435',message:'Return value structure',data:{hasRecords:returnValue.hasOwnProperty('records'),recordsInReturn:returnValue.records!==undefined,recordsLengthInReturn:returnValue.records?.length,returnKeys:Object.keys(returnValue)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    
+    return returnValue;
   }
 });

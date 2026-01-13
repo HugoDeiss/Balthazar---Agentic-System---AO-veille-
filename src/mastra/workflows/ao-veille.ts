@@ -2,6 +2,7 @@ import { createWorkflow, createStep } from '@mastra/core/workflows';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { boampFetcherTool, type CanonicalAO } from '../tools/boamp-fetcher';
+import { marchesonlineRSSFetcherTool } from '../tools/marchesonline-rss-fetcher';
 import {
   isRectification,
   findOriginalAO,
@@ -11,6 +12,7 @@ import { checkBatchAlreadyAnalyzed } from '../../persistence/ao-persistence';
 import { scheduleRetry } from '../../utils/retry-scheduler';
 import { calculateKeywordScore, calculateEnhancedKeywordScore, shouldSkipLLM } from '../../utils/balthazar-keywords';
 import { analyzeSemanticRelevance } from '../agents/boamp-semantic-analyzer';
+import { findBatchBOAMPMatches } from '../../utils/cross-platform-dedup';
 
 // ──────────────────────────────────────────────────
 // SUPABASE CLIENT
@@ -46,6 +48,15 @@ function getDaysRemaining(deadline: string): number {
 
 /** Convertit un CanonicalAO (structure imbriquée) vers le format plat aoSchema */
 function canonicalAOToFlatSchema(canonicalAO: CanonicalAO): z.infer<typeof aoSchema> {
+  // Détecter les annulations depuis nature_label ou nature
+  // BOAMP utilise nature_label: "Avis d'annulation" au lieu de etat: "AVIS_ANNULE"
+  const isAnnulation = 
+    canonicalAO.lifecycle.nature_label?.toLowerCase().includes('annulation') ||
+    canonicalAO.lifecycle.nature?.toLowerCase().includes('annulation') ||
+    canonicalAO.lifecycle.etat === 'AVIS_ANNULE';
+  
+  const normalizedEtat = isAnnulation ? 'AVIS_ANNULE' : (canonicalAO.lifecycle.etat || undefined);
+  
   return {
     source: canonicalAO.source,
     source_id: canonicalAO.source_id,
@@ -61,8 +72,8 @@ function canonicalAOToFlatSchema(canonicalAO: CanonicalAO): z.infer<typeof aoSch
     type_marche: canonicalAO.classification.type_marche || undefined,
     region: canonicalAO.identity.region,
     url_ao: canonicalAO.identity.url || undefined,
-    etat: canonicalAO.lifecycle.etat || undefined,
-    raw_json: canonicalAO // Conserver l'objet complet pour référence
+    etat: normalizedEtat,
+    raw_json: canonicalAO // Conserver l'objet complet pour référence (inclut uuid_procedure et siret)
   };
 }
 
@@ -127,23 +138,78 @@ const fetchAndPrequalifyStep = createStep({
   execute: async ({ inputData, requestContext }) => {
     const client = await getClient(inputData.clientId);
     
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ao-veille.ts:130',message:'Before BOAMP fetch',data:{clientId:inputData.clientId,since:inputData.since,typeMarche:client.preferences.typeMarche},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    
     // 1️⃣ Fetch BOAMP (filtrage structurel côté API)
-    const boampData = await boampFetcherTool.execute!({
-      since: inputData.since, // Optionnel, default = veille
-      typeMarche: client.preferences.typeMarche,
-      pageSize: 200 // Nombre d'AO à récupérer par page
-    }, {
-      requestContext
-    }) as {
-      source: string;
-      query: { since?: string; typeMarche: string; pageSize: number; minDeadline: string };
-      total_count: number;
-      fetched: number;
-      missing: number;
-      missing_ratio: number;
-      status: string;
-      records: CanonicalAO[];
-    };
+    let boampData: any;
+    try {
+      boampData = await boampFetcherTool.execute!({
+        since: inputData.since, // Optionnel, default = veille
+        typeMarche: client.preferences.typeMarche,
+        pageSize: 100 // Nombre d'AO à récupérer par page (MAX autorisé: 100 par OpenDataSoft)
+      }, {
+        requestContext
+      }) as {
+        source: string;
+        query: { since?: string; typeMarche: string; pageSize: number; minDeadline: string };
+        total_count: number;
+        fetched: number;
+        missing: number;
+        missing_ratio: number;
+        status: string;
+        records: CanonicalAO[];
+      };
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ao-veille.ts:148',message:'BOAMP fetch successful',data:{boampDataExists:!!boampData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+    } catch (error: any) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ao-veille.ts:151',message:'BOAMP fetch error',data:{errorMessage:error?.message,errorStack:error?.stack,errorName:error?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      throw error;
+    }
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ao-veille.ts:149',message:'After BOAMP fetch - check boampData',data:{boampDataIsNull:boampData===null,boampDataIsUndefined:boampData===undefined,boampDataType:typeof boampData,boampDataKeys:boampData?Object.keys(boampData):null,hasRecords:boampData?.hasOwnProperty('records'),recordsIsUndefined:boampData?.records===undefined,recordsIsNull:boampData?.records===null,recordsType:typeof boampData?.records,recordsIsArray:Array.isArray(boampData?.records)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C'})}).catch(()=>{});
+    // #endregion
+    
+    // Vérifier si le tool a retourné une erreur au lieu de la structure attendue
+    if (boampData && (boampData.error || boampData.message || boampData.validationErrors)) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ao-veille.ts:165',message:'BOAMP tool returned error object',data:{error:boampData.error,message:boampData.message,validationErrors:boampData.validationErrors},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
+      const errorMessage = boampData.message || boampData.error || 'Unknown error from BOAMP fetcher';
+      const validationErrors = boampData.validationErrors ? JSON.stringify(boampData.validationErrors) : '';
+      throw new Error(`BOAMP fetcher tool error: ${errorMessage}${validationErrors ? ` - Validation errors: ${validationErrors}` : ''}`);
+    }
+    
+    // Initialiser records à un tableau vide si undefined
+    if (!boampData.records) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ao-veille.ts:172',message:'Initializing empty records array',data:{boampDataExists:!!boampData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      boampData.records = [];
+      boampData.total_count = 0;
+      boampData.fetched = 0;
+      boampData.missing = 0;
+      boampData.missing_ratio = 0;
+      boampData.status = 'ERROR';
+      if (!boampData.query) {
+        boampData.query = {
+          since: inputData.since,
+          typeMarche: client.preferences.typeMarche,
+          pageSize: 100,
+          minDeadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        };
+      }
+    }
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ao-veille.ts:190',message:'Before accessing records.length',data:{boampDataExists:!!boampData,recordsExists:!!boampData?.records,recordsLength:boampData?.records?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     
     console.log(`📥 BOAMP Fetch: ${boampData.records.length} AO récupérés`);
     console.log(`📊 Total disponible: ${boampData.total_count}`);
@@ -171,10 +237,71 @@ const fetchAndPrequalifyStep = createStep({
       }
     }
     
-    // 3️⃣ TRANSFORMATION : Convertir CanonicalAO[] (structure imbriquée) vers format plat aoSchema
-    const prequalified = boampData.records.map(canonicalAOToFlatSchema);
+    // 3️⃣ Fetch MarchesOnline RSS (si configuré)
+    let marchesonlineData = null;
+    if (client.preferences.marchesonlineRSSUrls && 
+        Array.isArray(client.preferences.marchesonlineRSSUrls) && 
+        client.preferences.marchesonlineRSSUrls.length > 0) {
+      
+      console.log(`📡 Fetching MarchesOnline RSS (${client.preferences.marchesonlineRSSUrls.length} flux)...`);
+      
+      marchesonlineData = await marchesonlineRSSFetcherTool.execute!({
+        rssUrls: client.preferences.marchesonlineRSSUrls,
+        since: inputData.since,
+        typeMarche: client.preferences.typeMarche
+      }, {
+        requestContext
+      }) as any as {
+        source: string;
+        query: { rssUrls: string[]; since: string; typeMarche: string };
+        total_count: number;
+        fetched: number;
+        records: CanonicalAO[];
+        status: string;
+      };
+      
+      console.log(`📥 MarchesOnline RSS: ${marchesonlineData.records.length} AO récupérés`);
+      
+      // 4️⃣ DÉDUPLICATION CRITIQUE : Vérifier quels AO MarchesOnline existent déjà via BOAMP
+      if (marchesonlineData.records.length > 0) {
+        const matches = await findBatchBOAMPMatches(
+          marchesonlineData.records.map(ao => ({
+            uuid_procedure: ao.uuid_procedure,
+            title: ao.identity.title,
+            acheteur: ao.identity.acheteur,
+            deadline: ao.lifecycle.deadline,
+            publication_date: ao.lifecycle.publication_date,
+            siret: (ao.metadata as any).siret
+          }))
+        );
+        
+        // Filtrer : garder uniquement les AO MarchesOnline SANS match BOAMP
+        const uniqueMarchesonlineAOs = marchesonlineData.records.filter((ao, index) => {
+          const match = matches.get(index);
+          if (match) {
+            console.log(`⏭️  AO MarchesOnline "${ao.identity.title.slice(0, 50)}..." déjà traité via BOAMP ${match.source_id} (${match.match_strategy})`);
+            return false; // Exclure ce doublon
+          }
+          return true; // Garder cet AO unique
+        });
+        
+        const duplicateCount = marchesonlineData.records.length - uniqueMarchesonlineAOs.length;
+        console.log(`✅ MarchesOnline: ${uniqueMarchesonlineAOs.length} AO uniques (${duplicateCount} doublons exclus)`);
+        
+        marchesonlineData.records = uniqueMarchesonlineAOs;
+      }
+    }
     
-    console.log(`✅ Collecte: ${prequalified.length} AO transmis à l'analyse`);
+    // 5️⃣ Fusionner les deux sources (maintenant sans doublons)
+    const allRecords = [
+      ...(boampData.records || []),
+      ...(marchesonlineData?.records || [])
+    ];
+    
+    // 6️⃣ TRANSFORMATION : Convertir CanonicalAO[] (structure imbriquée) vers format plat aoSchema
+    const prequalified = allRecords.map(canonicalAOToFlatSchema);
+    
+    console.log(`✅ Collecte: ${prequalified.length} AO transmis à l'analyse (${boampData.records?.length || 0} BOAMP + ${marchesonlineData?.records?.length || 0} MarchesOnline)`);
     
     return { 
       prequalified, 
@@ -211,24 +338,74 @@ const handleCancellationsStep = createStep({
         cancelledCount++;
         console.log(`❌ AO annulé détecté: ${ao.title} (${ao.source_id})`);
         
-        // Mise à jour DB : marquer comme annulé
+        // Mise à jour DB : marquer comme annulé (ou créer si n'existe pas)
         try {
-          const { error } = await supabase
+          // Calculer les clés de déduplication (comme dans save-results)
+          const { generateDedupKeys } = await import('../../utils/cross-platform-dedup');
+          const dedupKeys = generateDedupKeys({
+            uuid_procedure: ao.raw_json?.uuid_procedure || null,
+            title: ao.title,
+            acheteur: ao.acheteur || null,
+            deadline: ao.deadline || null,
+            publication_date: ao.publication_date || null,
+            siret: ao.raw_json?.metadata?.siret || null
+          });
+          
+          // Extraire les données depuis raw_json si nécessaire
+          const rawJson = ao.raw_json || {};
+          const metadata = rawJson.metadata || {};
+          
+          const { data, error } = await supabase
             .from('appels_offres')
-            .update({
+            .upsert({
+              source: ao.source,
+              source_id: ao.source_id,
+              
+              // 🆕 Identifiants BOAMP
+              boamp_id: ao.source === 'BOAMP' ? ao.source_id : null,
+              
+              // 🆕 Déduplication cross-platform
+              uuid_procedure: dedupKeys.uuid_key,
+              siret: ao.raw_json?.metadata?.siret || null,
+              dedup_key: dedupKeys.composite_key,
+              siret_deadline_key: dedupKeys.siret_deadline_key,
+              
+              title: ao.title,
+              description: ao.description,
+              keywords: ao.keywords,
+              acheteur: ao.acheteur,
+              acheteur_email: ao.acheteur_email || metadata.acheteur_email || null,
+              acheteur_tel: metadata.acheteur_tel || null,
+              budget_min: ao.budget_min,
+              budget_max: ao.budget_max,
+              deadline: ao.deadline,
+              publication_date: ao.publication_date,
+              type_marche: ao.type_marche,
+              region: ao.region,
+              url_ao: ao.url_ao,
               etat: 'AVIS_ANNULE',
               status: 'cancelled',
+              raw_json: ao.raw_json,
               updated_at: new Date().toISOString()
+            }, {
+              onConflict: 'source_id',
+              ignoreDuplicates: false
             })
-            .eq('source_id', ao.source_id);
+            .select();
           
           if (error) {
             console.error(`⚠️ Erreur MAJ annulation pour ${ao.source_id}:`, error);
+            console.error(`   Détails:`, JSON.stringify(error, null, 2));
           } else {
-            console.log(`✅ AO ${ao.source_id} marqué comme annulé en DB`);
+            const rowsAffected = data?.length || 0;
+            if (rowsAffected > 0) {
+              console.log(`✅ AO ${ao.source_id} marqué comme annulé en DB (${rowsAffected} ligne(s) affectée(s))`);
+            } else {
+              console.warn(`⚠️ Aucune ligne affectée pour ${ao.source_id} (peut-être déjà annulé ?)`);
+            }
           }
         } catch (err) {
-          console.error(`⚠️ Exception MAJ annulation:`, err);
+          console.error(`⚠️ Exception MAJ annulation pour ${ao.source_id}:`, err);
         }
         
         // Ne pas transmettre à l'analyse IA
@@ -585,7 +762,7 @@ const saveResultsStep = createStep({
       low: z.number(),
       llmCalls: z.number()
     }),
-    client: clientSchema
+    client: clientSchema.nullable()
   }),
   outputSchema: z.object({
     saved: z.number(),
@@ -597,6 +774,19 @@ const saveResultsStep = createStep({
   }),
   execute: async ({ inputData }) => {
     const { all: scored, client, stats } = inputData;
+    
+    // Gérer le cas où client est null (aucun AO à sauvegarder)
+    if (!client) {
+      console.log(`⚠️ Pas de client disponible, aucune sauvegarde effectuée`);
+      return {
+        saved: 0,
+        high: stats.high,
+        medium: stats.medium,
+        low: stats.low,
+        cancelled: stats.cancelled,
+        llmCalls: stats.llmCalls
+      };
+    }
     
     console.log(`💾 Sauvegarde de ${scored.length} AO pour le client ${client.name}...`);
     
@@ -618,8 +808,23 @@ const saveResultsStep = createStep({
           rejected_reason: ao._originalAO.rejected_reason || null
         });
         
+        // Recalculer les clés de déduplication car certains champs peuvent avoir changé
+        const { generateDedupKeys } = await import('../../utils/cross-platform-dedup');
+        const dedupKeys = generateDedupKeys({
+          uuid_procedure: ao.raw_json?.uuid_procedure || null,
+          title: ao.title,
+          acheteur: ao.acheteur || null,
+          deadline: ao.deadline || null,
+          publication_date: ao.publication_date || null,
+          siret: ao.raw_json?.metadata?.siret || null
+        });
+        
         // UPDATE de l'AO existant (pas INSERT)
         await supabase.from('appels_offres').update({
+          // 🆕 Recalculer les clés de déduplication (si champs ont changé)
+          dedup_key: dedupKeys.composite_key,
+          siret_deadline_key: dedupKeys.siret_deadline_key,
+          
           // Contenu
           title: ao.title,
           description: ao.description,
@@ -684,10 +889,31 @@ const saveResultsStep = createStep({
       // ────────────────────────────────────────────────────────────
       // CAS NORMAL : AO nouveau ou non-rectificatif
       // ────────────────────────────────────────────────────────────
+      
+      // 🆕 Calculer les clés de déduplication
+      const { generateDedupKeys } = await import('../../utils/cross-platform-dedup');
+      const dedupKeys = generateDedupKeys({
+        uuid_procedure: ao.raw_json?.uuid_procedure || null,
+        title: ao.title,
+        acheteur: ao.acheteur || null,
+        deadline: ao.deadline || null,
+        publication_date: ao.publication_date || null,
+        siret: ao.raw_json?.metadata?.siret || null
+      });
+      
       await supabase.from('appels_offres').upsert({
         // Identifiants
         source: ao.source,
         source_id: ao.source_id,
+        
+        // 🆕 Identifiants BOAMP
+        boamp_id: ao.source === 'BOAMP' ? ao.source_id : null,
+        
+        // 🆕 Déduplication cross-platform
+        uuid_procedure: dedupKeys.uuid_key,
+        siret: ao.raw_json?.metadata?.siret || null,
+        dedup_key: dedupKeys.composite_key,
+        siret_deadline_key: dedupKeys.siret_deadline_key,
         
         // Contenu
         title: ao.title,
@@ -865,11 +1091,25 @@ const handleMinorRectificationAOStep = createStep({
     
     // Mettre à jour les champs modifiés (deadline, etc.) en DB
     try {
+      // Recalculer les clés de déduplication car le deadline peut avoir changé
+      const { generateDedupKeys } = await import('../../utils/cross-platform-dedup');
+      const dedupKeys = generateDedupKeys({
+        uuid_procedure: ao.raw_json?.uuid_procedure || null,
+        title: ao.title,
+        acheteur: ao.acheteur || null,
+        deadline: ao.deadline || null,
+        publication_date: ao.publication_date || null,
+        siret: ao.raw_json?.metadata?.siret || null
+      });
+      
       await supabase
         .from('appels_offres')
         .update({
           deadline: ao.deadline,
           raw_json: ao.raw_json,
+          // 🆕 Recalculer les clés de déduplication (deadline peut avoir changé)
+          dedup_key: dedupKeys.composite_key,
+          siret_deadline_key: dedupKeys.siret_deadline_key,
           rectification_date: new Date().toISOString(),
           rectification_count: (ao._originalAO?.rectification_count || 0) + 1,
           updated_at: new Date().toISOString()
@@ -905,7 +1145,9 @@ const handleSkipLLMAOStep = createStep({
     ao: aoSchema.extend({
       keywordScore: z.number(),
       matchedKeywords: z.array(z.string()),
+      keywordSignals: z.record(z.boolean()).optional(),
       keywordDetails: z.any().optional(),
+      criteresAttribution: z.any().optional(),
       _shouldSkipLLM: z.boolean().optional(),
       _skipLLMPriority: z.enum(['SKIP', 'LOW', 'MEDIUM', 'HIGH']).optional(),
       _skipLLMReason: z.string().optional(),
@@ -1165,7 +1407,11 @@ const processOneAOWorkflow = createWorkflow({
       keywordScore: z.number(),
       matchedKeywords: z.array(z.string()),
       keywordSignals: z.record(z.boolean()).optional(),
+      keywordDetails: z.any().optional(),
       criteresAttribution: z.any().optional(),
+      _shouldSkipLLM: z.boolean().optional(),
+      _skipLLMPriority: z.enum(['SKIP', 'LOW', 'MEDIUM', 'HIGH']).optional(),
+      _skipLLMReason: z.string().optional(),
       _isRectification: z.boolean().optional(),
       _originalAO: z.any().optional(),
       _changes: z.any().optional()
@@ -1195,12 +1441,17 @@ const processOneAOWorkflow = createWorkflow({
     // ────────────────────────────────────────────────────
     // BRANCH 1 : AO ANNULÉ
     // ────────────────────────────────────────────────────
-    // Critère : etat === 'AVIS_ANNULE'
+    // Critère : etat === 'AVIS_ANNULE' ou nature_label/nature contient "annulation"
     // Action : Update DB uniquement, STOP du pipeline
     // Coût LLM : 0
     [
       async ({ inputData }) => {
-        const isAnnule = inputData.ao.etat === 'AVIS_ANNULE';
+        // Vérifier etat normalisé (priorité)
+        // Fallback : vérifier raw_json si etat n'est pas encore normalisé
+        const isAnnule = 
+          inputData.ao.etat === 'AVIS_ANNULE' ||
+          (inputData.ao.raw_json?.lifecycle?.nature_label?.toLowerCase().includes('annulation')) ||
+          (inputData.ao.raw_json?.lifecycle?.nature?.toLowerCase().includes('annulation'));
         if (isAnnule) {
           console.log(`🔀 Branch 1: AO ANNULÉ détecté - ${inputData.ao.title}`);
         }
@@ -1268,18 +1519,62 @@ const processOneAOWorkflow = createWorkflow({
     // ────────────────────────────────────────────────────
     // BRANCH 4 : NOUVEL AO (FALLBACK)
     // ────────────────────────────────────────────────────
-    // Critère : true (default, tous les autres cas)
+    // Critère : !_shouldSkipLLM (ne s'exécute que si on ne skip pas LLM)
     // Action : Pipeline LLM complet standard
     // Coût LLM : 1 appel (semantic)
     [
       async ({ inputData }) => {
-        console.log(`🔀 Branch 4: NOUVEL AO - ${inputData.ao.title}`);
-        return true; // Fallback : tous les autres cas
+        const shouldSkip = (inputData.ao as any)._shouldSkipLLM === true;
+        if (!shouldSkip) {
+          console.log(`🔀 Branch 4: NOUVEL AO - ${inputData.ao.title}`);
+        }
+        return !shouldSkip; // Ne s'exécute que si on ne skip pas LLM
       },
       analyzeAOCompleteWorkflow
     ]
   ])
   .commit();
+
+// ──────────────────────────────────────────────────
+// STEP : NORMALISATION DES RÉSULTATS BRANCHÉS
+// ──────────────────────────────────────────────────
+// Rôle : Extraire le résultat de la branche exécutée depuis l'objet branché
+// Input : Tableau d'objets avec clés de branches { "handle-skip-llm-ao": {...}, ... }
+// Output : Tableau de { ao, client } normalisé
+const normalizeBranchResultsStep = createStep({
+  id: 'normalize-branch-results',
+  inputSchema: z.array(z.any()), // Tableau d'objets branchés
+  outputSchema: z.array(z.object({
+    ao: z.any(),
+    client: clientSchema
+  })),
+  execute: async ({ inputData }) => {
+    // Normaliser chaque résultat branché
+    return inputData.map((branchResult: any) => {
+      // Le workflow branché retourne un objet avec des clés de branches
+      // On extrait le résultat de la première branche qui existe
+      if (branchResult['handle-skip-llm-ao']) {
+        return branchResult['handle-skip-llm-ao'];
+      }
+      if (branchResult['handle-cancelled-ao']) {
+        return branchResult['handle-cancelled-ao'];
+      }
+      if (branchResult['analyze-ao-complete']) {
+        return branchResult['analyze-ao-complete'];
+      }
+      // Fallback : si la structure est déjà normalisée
+      if (branchResult.ao && branchResult.client) {
+        return branchResult;
+      }
+      // Si aucune structure attendue n'est trouvée, on essaie de prendre la première valeur
+      const keys = Object.keys(branchResult);
+      if (keys.length > 0) {
+        return branchResult[keys[0]];
+      }
+      throw new Error(`Cannot normalize branch result: ${JSON.stringify(branchResult)}`);
+    });
+  }
+});
 
 // ──────────────────────────────────────────────────
 // STEP : AGRÉGATION DES RÉSULTATS APRÈS .foreach()
@@ -1309,27 +1604,47 @@ const aggregateResultsStep = createStep({
       low: z.number(),
       llmCalls: z.number()
     }),
-    client: clientSchema
+    client: clientSchema.nullable()
   }),
   execute: async ({ inputData }) => {
     console.log(`📊 Agrégation de ${inputData.length} AO traités...`);
     
     // ────────────────────────────────────────────────────────────
-    // 1. EXTRACTION : Récupérer tous les AO du tableau
+    // 1. GÉRER LE CAS OÙ IL N'Y A AUCUN AO (tous annulés ou filtrés)
+    // ────────────────────────────────────────────────────────────
+    if (inputData.length === 0) {
+      console.log(`⚠️ Aucun AO à agréger (tous annulés ou filtrés)`);
+      // Retourner une structure vide avec des stats à zéro
+      // Note: client est null car on ne peut pas le récupérer sans AO
+      return {
+        all: [],
+        high: [],
+        medium: [],
+        low: [],
+        cancelled: [],
+        stats: {
+          total: 0,
+          analysed: 0,
+          cancelled: 0,
+          skipped: 0,
+          high: 0,
+          medium: 0,
+          low: 0,
+          llmCalls: 0
+        },
+        client: null
+      };
+    }
+    
+    // ────────────────────────────────────────────────────────────
+    // 2. EXTRACTION : Récupérer tous les AO du tableau
     // ────────────────────────────────────────────────────────────
     const allAOs = inputData.map(item => item.ao);
     
     // ────────────────────────────────────────────────────────────
-    // 2. RÉCUPÉRATION DU CLIENT (explicite, pas de getStepResult)
+    // 3. RÉCUPÉRATION DU CLIENT (explicite, pas de getStepResult)
     // ────────────────────────────────────────────────────────────
-    const client = inputData.length > 0 
-      ? inputData[0].client 
-      : null;
-    
-    if (!client) {
-      console.warn('⚠️ Aucun AO à agréger, client introuvable');
-      throw new Error('No AO to aggregate, cannot retrieve client');
-    }
+    const client = inputData[0].client;
     
     // ────────────────────────────────────────────────────────────
     // 3. SÉPARATION PAR CATÉGORIE (tri simple, pas d'intelligence)
@@ -1457,6 +1772,13 @@ export const aoVeilleWorkflow = createWorkflow({
   // Chaque AO est traité individuellement par le workflow imbriqué
   // avec un maximum de 10 AO en parallèle pour contrôler le rate limiting
   .foreach(processOneAOWorkflow, { concurrency: 10 })
+  
+  // ═══════════════════════════════════════════════════════
+  // PHASE 3.5 : NORMALISATION DES RÉSULTATS BRANCHÉS
+  // ═══════════════════════════════════════════════════════
+  // Le workflow branché retourne { "handle-skip-llm-ao": {...}, "analyze-ao-complete": {...} }
+  // On doit extraire le résultat de la branche qui a été exécutée
+  .then(normalizeBranchResultsStep)
   
   // ═══════════════════════════════════════════════════════
   // PHASE 4 : AGRÉGATION DES RÉSULTATS

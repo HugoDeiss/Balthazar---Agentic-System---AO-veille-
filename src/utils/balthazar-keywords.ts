@@ -47,7 +47,8 @@ export const balthazarLexicon = {
         "gca", "groupement crédit agricole", "groupement credit agricole",
         // Ajouts recommandés
         "santé", "sante", "maladie", "retraite",
-        "indemnisation", "sinistre", "prestation",
+        "indemnisation", "sinistre",
+        // "prestation" retiré - trop générique, cause des faux positifs
         "adhérent", "adherent", "sociétaire", "societaire",
         "cotisation", "couverture sociale"
       ],
@@ -55,7 +56,10 @@ export const balthazarLexicon = {
         /assuran(ce|tiel)/i,
         /mutuelle/i,
         /pr(é|e)voyan(ce|t)/i,
-        /s(é|e)curit(é|e)\s+sociale/i
+        /s(é|e)curit(é|e)\s+sociale/i,
+        // Patterns plus spécifiques pour les prestations d'assurance
+        /prestation\s+(d['']|de\s+)?(assurance|sant(é|e)|pr(é|e)voyance|retraite)/i,
+        /prestation\s+assurantielle/i
       ]
     },
     energie: {

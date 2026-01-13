@@ -138,7 +138,22 @@ CREATE TABLE IF NOT EXISTS appels_offres (
   
   boamp_id TEXT,                     -- ID BOAMP original (si différent de source_id)
   normalized_id TEXT,                -- ID normalisé pour déduplication avancée
-  annonce_lie TEXT                   -- ID de l'annonce originale (pour rectificatifs)
+  annonce_lie TEXT,                  -- ID de l'annonce originale (pour rectificatifs)
+  
+  -- ============================================
+  -- ÉTAT BOAMP
+  -- ============================================
+  
+  etat TEXT,                         -- État BOAMP original (AVIS_ANNULE, INITIAL, etc.)
+  
+  -- ============================================
+  -- DÉDUPLICATION CROSS-PLATFORM
+  -- ============================================
+  
+  uuid_procedure UUID,               -- UUID universel de la procédure (contractfolderid BOAMP / Identifiant de la procédure MarchesOnline)
+  siret TEXT,                        -- SIRET de l'acheteur (disponible dans MarchesOnline)
+  dedup_key TEXT,                    -- Clé composite normalisée : title|deadline|acheteur (pour déduplication niveau 2)
+  siret_deadline_key TEXT            -- Clé composite : siret|deadline (pour déduplication niveau 3)
 );
 
 -- ============================================
@@ -169,6 +184,30 @@ ON appels_offres(client_id, priority, analyzed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_appels_offres_annonce_lie 
 ON appels_offres(annonce_lie) 
 WHERE annonce_lie IS NOT NULL;
+
+-- Index sur etat pour les requêtes fréquentes sur les annulations
+CREATE INDEX IF NOT EXISTS idx_appels_offres_etat 
+ON appels_offres(etat)
+WHERE etat IS NOT NULL;
+
+-- ============================================
+-- INDEX POUR DÉDUPLICATION CROSS-PLATFORM
+-- ============================================
+
+-- Index unique sur uuid_procedure (niveau 1 de déduplication - 99% de fiabilité)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ao_uuid_procedure
+ON appels_offres(uuid_procedure)
+WHERE uuid_procedure IS NOT NULL;
+
+-- Index sur dedup_key (niveau 2 de déduplication - 95% de fiabilité)
+CREATE INDEX IF NOT EXISTS idx_ao_dedup_key
+ON appels_offres(dedup_key)
+WHERE dedup_key IS NOT NULL;
+
+-- Index sur siret_deadline_key (niveau 3 de déduplication - 80% de fiabilité)
+CREATE INDEX IF NOT EXISTS idx_ao_siret_deadline
+ON appels_offres(siret_deadline_key)
+WHERE siret_deadline_key IS NOT NULL;
 
 -- ============================================
 -- 4. FONCTION DE MISE À JOUR AUTO updated_at
