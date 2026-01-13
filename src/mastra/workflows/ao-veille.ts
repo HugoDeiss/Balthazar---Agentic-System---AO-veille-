@@ -271,7 +271,8 @@ const fetchAndPrequalifyStep = createStep({
             acheteur: ao.identity.acheteur,
             deadline: ao.lifecycle.deadline,
             publication_date: ao.lifecycle.publication_date,
-            siret: (ao.metadata as any).siret
+            siret: (ao.metadata as any).siret,
+            description: ao.content.description // 🆕 Description pour extraction numéro d'annonce BOAMP
           }))
         );
         
@@ -348,7 +349,9 @@ const handleCancellationsStep = createStep({
             acheteur: ao.acheteur || null,
             deadline: ao.deadline || null,
             publication_date: ao.publication_date || null,
-            siret: ao.raw_json?.metadata?.siret || null
+            siret: ao.raw_json?.metadata?.siret || null,
+            source_id: ao.source_id || null,
+            source: ao.source || null
           });
           
           // Extraire les données depuis raw_json si nécessaire
@@ -814,7 +817,9 @@ const saveResultsStep = createStep({
           acheteur: ao.acheteur || null,
           deadline: ao.deadline || null,
           publication_date: ao.publication_date || null,
-          siret: ao.raw_json?.metadata?.siret || null
+          siret: ao.raw_json?.metadata?.siret || null,
+          source_id: ao.source_id || null,
+          source: ao.source || null
         });
         
         // UPDATE de l'AO existant (pas INSERT)

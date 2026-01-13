@@ -89,26 +89,89 @@ function normalizeBoampRecord(rawRecord: any) {
   }
   
   // ═══════════════════════════════════════════════════════════
-  // 🆕 EXTRACTION UUID PROCÉDURE (contractfolderid)
+  // 🆕 EXTRACTION UUID PROCÉDURE (contractfolderid) - AMÉLIORÉE
   // ═══════════════════════════════════════════════════════════
   let uuid_procedure: string | null = null;
   
   // Priorité 1 : Champ direct contractfolderid (si présent dans fields)
   if (fields.contractfolderid) {
-    uuid_procedure = fields.contractfolderid;
+    uuid_procedure = String(fields.contractfolderid).trim();
+    if (uuid_procedure) {
+      console.log(`[UUID] ✅ Trouvé dans fields.contractfolderid pour ${fields.idweb}: ${uuid_procedure}`);
+    }
   }
-  // Priorité 2 : Chercher dans donnees JSON
-  else if (donneesObj) {
-    // Chercher dans différentes structures possibles
+  
+  // Priorité 2 : Chercher dans donnees JSON (recherche approfondie)
+  if (!uuid_procedure && donneesObj) {
+    // Recherche directe dans les clés principales
     uuid_procedure = donneesObj.CONTRACT_FOLDER_ID 
       || donneesObj.contractfolderid
       || donneesObj.IDENTIFIANT_PROCEDURE
-      || extractUUIDFromString(JSON.stringify(donneesObj));
+      || donneesObj.identifiant_procedure
+      || donneesObj.CONTRACTFOLDERID;
+    
+    // Normaliser si trouvé
+    if (uuid_procedure) {
+      uuid_procedure = String(uuid_procedure).trim().toLowerCase();
+    }
+    
+    // Recherche dans structures imbriquées possibles
+    if (!uuid_procedure) {
+      uuid_procedure = donneesObj.PROCEDURE?.CONTRACT_FOLDER_ID
+        || donneesObj.PROCEDURE?.contractfolderid
+        || donneesObj.PROCEDURE?.IDENTIFIANT
+        || donneesObj.MARCHE?.CONTRACT_FOLDER_ID
+        || donneesObj.MARCHE?.contractfolderid
+        || donneesObj.IDENTITE?.CONTRACT_FOLDER_ID;
+      
+      if (uuid_procedure) {
+        uuid_procedure = String(uuid_procedure).trim().toLowerCase();
+      }
+    }
+    
+    // Recherche regex dans tout le JSON stringifié (fallback)
+    if (!uuid_procedure) {
+      const jsonString = JSON.stringify(donneesObj);
+      uuid_procedure = extractUUIDFromString(jsonString);
+    }
+    
+    if (uuid_procedure) {
+      console.log(`[UUID] ✅ Trouvé dans donnees JSON pour ${fields.idweb}: ${uuid_procedure}`);
+    } else {
+      // Log de debug pour comprendre la structure (seulement pour les premiers AO)
+      const debugKeys = Object.keys(donneesObj).slice(0, 10);
+      if (Math.random() < 0.1) { // Log seulement 10% du temps pour éviter spam
+        console.warn(`[UUID] ⚠️ Non trouvé dans donnees JSON pour ${fields.idweb}. Clés disponibles:`, debugKeys.join(', '));
+      }
+    }
   }
+  
   // Priorité 3 : Chercher dans description (fallback)
   if (!uuid_procedure) {
     const description = donneesObj?.OBJET?.OBJET_COMPLET || fields.objet || '';
     uuid_procedure = extractUUIDFromString(description);
+    if (uuid_procedure) {
+      console.log(`[UUID] ✅ Trouvé dans description pour ${fields.idweb}: ${uuid_procedure}`);
+    }
+  }
+  
+  // Priorité 4 : Chercher dans l'URL (dernier recours)
+  if (!uuid_procedure && fields.url_avis) {
+    uuid_procedure = extractUUIDFromString(fields.url_avis);
+    if (uuid_procedure) {
+      console.log(`[UUID] ✅ Trouvé dans URL pour ${fields.idweb}: ${uuid_procedure}`);
+    }
+  }
+  
+  // Log final si toujours null (seulement pour les premiers AO)
+  if (!uuid_procedure && Math.random() < 0.05) { // Log seulement 5% du temps
+    const availableFields = Object.keys(fields).filter(k => 
+      k.toLowerCase().includes('id') || k.toLowerCase().includes('uuid') || k.toLowerCase().includes('contract')
+    );
+    console.warn(`[UUID] ⚠️ Aucun UUID trouvé pour ${fields.idweb} (source_id: ${fields.idweb})`);
+    if (availableFields.length > 0) {
+      console.warn(`[UUID]   Champs disponibles dans fields:`, availableFields.join(', '));
+    }
   }
   
   // Calcul de la région depuis le département
@@ -183,12 +246,37 @@ function normalizeBoampRecord(rawRecord: any) {
 }
 
 /**
- * Extrait un UUID v4 depuis une string
+ * Extrait un UUID v4 depuis une string (amélioré)
+ * Supporte différents formats d'UUID
  */
 function extractUUIDFromString(text: string): string | null {
-  const uuidPattern = /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i;
-  const match = text.match(uuidPattern);
-  return match ? match[0].toLowerCase() : null;
+  if (!text || typeof text !== 'string') return null;
+  
+  // Pattern UUID v4 standard: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+  const uuidPatterns = [
+    // Format standard avec tirets
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+    // Format sans tirets (32 caractères hex)
+    /[0-9a-f]{32}/i,
+    // Format avec underscores (moins courant)
+    /[0-9a-f]{8}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{4}_[0-9a-f]{12}/i
+  ];
+  
+  for (const pattern of uuidPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      let uuid = match[0].toLowerCase();
+      // Normaliser le format sans tirets vers format standard
+      if (uuid.length === 32) {
+        uuid = `${uuid.slice(0, 8)}-${uuid.slice(8, 12)}-${uuid.slice(12, 16)}-${uuid.slice(16, 20)}-${uuid.slice(20, 32)}`;
+      }
+      // Normaliser underscores vers tirets
+      uuid = uuid.replace(/_/g, '-');
+      return uuid;
+    }
+  }
+  
+  return null;
 }
 
 // Type explicite pour l'AO canonique
