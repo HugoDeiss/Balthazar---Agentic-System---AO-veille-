@@ -10,6 +10,7 @@ import {
 import { checkBatchAlreadyAnalyzed } from '../../persistence/ao-persistence';
 import { scheduleRetry } from '../../utils/retry-scheduler';
 import { calculateKeywordScore, calculateEnhancedKeywordScore, shouldSkipLLM } from '../../utils/balthazar-keywords';
+import { analyzeSemanticRelevance } from '../agents/boamp-semantic-analyzer';
 
 // ──────────────────────────────────────────────────
 // SUPABASE CLIENT
@@ -612,7 +613,6 @@ const saveResultsStep = createStep({
         history.push({
           date: ao._originalAO.analyzed_at,
           semantic_score: ao._originalAO.semantic_score,
-          feasibility: ao._originalAO.feasibility,
           priority: ao._originalAO.priority,
           final_score: ao._originalAO.final_score,
           rejected_reason: ao._originalAO.rejected_reason || null
@@ -647,9 +647,6 @@ const saveResultsStep = createStep({
           // Analyse sémantique
           semantic_score: ao.semanticScore,
           semantic_reason: ao.semanticReason,
-          
-          // Analyse faisabilité
-          feasibility: ao.feasibility,
           
           // Scoring final
           final_score: ao.finalScore,
@@ -719,9 +716,6 @@ const saveResultsStep = createStep({
         // Analyse sémantique
         semantic_score: ao.semanticScore,
         semantic_reason: ao.semanticReason,
-        
-        // Analyse faisabilité
-        feasibility: ao.feasibility,
         
         // Scoring final
         final_score: ao.finalScore,
@@ -793,14 +787,6 @@ const handleCancellationAOStep = createStep({
       matchedKeywords: z.array(z.string()),
       semanticScore: z.number().optional(),
       semanticReason: z.string().optional(),
-      feasibility: z.object({
-        financial: z.boolean(),
-        technical: z.boolean(),
-        timing: z.boolean(),
-        blockers: z.array(z.string()),
-        confidence: z.enum(['high', 'medium', 'low'])
-      }).optional(),
-      isFeasible: z.boolean().optional(),
       finalScore: z.number(),
       priority: z.enum(['HIGH', 'MEDIUM', 'LOW', 'CANCELLED'])
     }),
@@ -863,14 +849,6 @@ const handleMinorRectificationAOStep = createStep({
       matchedKeywords: z.array(z.string()),
       semanticScore: z.number().optional(),
       semanticReason: z.string().optional(),
-      feasibility: z.object({
-        financial: z.boolean(),
-        technical: z.boolean(),
-        timing: z.boolean(),
-        blockers: z.array(z.string()),
-        confidence: z.enum(['high', 'medium', 'low'])
-      }).optional(),
-      isFeasible: z.boolean().optional(),
       finalScore: z.number(),
       priority: z.enum(['HIGH', 'MEDIUM', 'LOW', 'CANCELLED']),
       _isRectification: z.boolean().optional(),
@@ -943,14 +921,6 @@ const handleSkipLLMAOStep = createStep({
       matchedKeywords: z.array(z.string()),
       semanticScore: z.number().optional(),
       semanticReason: z.string().optional(),
-      feasibility: z.object({
-        financial: z.boolean(),
-        technical: z.boolean(),
-        timing: z.boolean(),
-        blockers: z.array(z.string()),
-        confidence: z.enum(['high', 'medium', 'low'])
-      }).optional(),
-      isFeasible: z.boolean().optional(),
       finalScore: z.number(),
       priority: z.enum(['HIGH', 'MEDIUM', 'LOW', 'CANCELLED']),
       _isRectification: z.boolean().optional(),
@@ -1014,6 +984,7 @@ const analyzeOneAOSemanticStep = createStep({
     ao: aoSchema.extend({
       keywordScore: z.number(),
       matchedKeywords: z.array(z.string()),
+      keywordDetails: z.any().optional(),
       keywordSignals: z.record(z.boolean()).optional(),
       criteresAttribution: z.any().optional(),
       _isRectification: z.boolean().optional(),
@@ -1026,232 +997,48 @@ const analyzeOneAOSemanticStep = createStep({
     ao: aoSchema.extend({
       keywordScore: z.number(),
       matchedKeywords: z.array(z.string()),
+      keywordDetails: z.any().optional(),
       keywordSignals: z.record(z.boolean()).optional(),
       criteresAttribution: z.any().optional(),
       semanticScore: z.number(),
       semanticReason: z.string(),
+      semanticDetails: z.any().optional(),
       procedureType: z.string().nullable(),
+      daysRemaining: z.number(),
       _isRectification: z.boolean().optional(),
       _originalAO: z.any().optional(),
       _changes: z.any().optional()
     }),
     client: clientSchema
   }),
-  execute: async ({ inputData, mastra }) => {
+  execute: async ({ inputData }) => {
     const { ao, client } = inputData;
     
     console.log(`🔍 Analyse sémantique de l'AO: ${ao.title}`);
     
-    // Utilisation de l'agent spécialisé boampSemanticAnalyzer
-    const semanticAgent = mastra?.getAgent('boampSemanticAnalyzer');
-    if (!semanticAgent) {
-      throw new Error('Agent boampSemanticAnalyzer not found');
-    }
+    // Récupérer keywordDetails si disponible
+    const keywordDetails = (ao as any).keywordDetails || null;
     
-    const procedureContext = ao.raw_json?.procedure_libelle 
-      ? `Type de procédure: ${ao.raw_json.procedure_libelle}
-         // Procédure ouverte = accessible à tous (+3 points)
-         // Procédure restreinte = sur présélection (neutre)
-         // Dialogue compétitif = nécessite plus de ressources (-1 point)
-         // MPS = procédure allégée (+2 points)`
-      : 'Type de procédure non spécifié';
-
-    const analysis = await semanticAgent.generate([
-      {
-        role: 'user',
-        content: `
-Profil client:
-- Nom: ${client.name}
-- Mots-clés métier: ${client.keywords.join(', ')}
-- Type de marché: ${client.preferences.typeMarche}
-- Description: ${JSON.stringify(client.profile, null, 2)}
-- Budget minimum: ${client.criteria.minBudget}€
-- Régions cibles: ${client.criteria.regions?.join(', ') || 'Toutes régions'}
-
-Appel d'offres:
-- Titre: ${ao.title}
-- Description: ${ao.description || 'Non fournie'}
-- Mots-clés: ${ao.keywords?.join(', ') || 'Aucun'}
-- Acheteur: ${ao.acheteur || 'Non spécifié'}
-- Type de marché: ${ao.type_marche || 'Non spécifié'}
-- Budget estimé: ${ao.budget_max ? `${ao.budget_max}€` : 'Non spécifié'}
-- Région: ${ao.region || 'Non spécifiée'}
-- Pré-score mots-clés: ${ao.keywordScore?.toFixed(2) || 'N/A'}
-- Signaux détectés: ${(ao as any).keywordSignals ? Object.entries((ao as any).keywordSignals).filter(([_, v]) => v).map(([k]) => k).join(', ') || 'Aucun' : 'N/A'}
-
-${procedureContext}
-
-Question: Sur une échelle de 0 à 10, quelle est la pertinence de cet AO pour ce client ?
-
-Critères d'évaluation:
-1. Adéquation métier (secteur, expertise, mots-clés)
-2. Budget compatible avec les capacités du client
-3. Localisation géographique (priorité aux régions cibles, mais pas éliminatoire)
-4. Type de procédure (ouvert = accessible, restreint = compétitif)
-5. Signaux faibles détectés par le pré-scoring
-
-Réponds UNIQUEMENT en JSON:
-{
-  "score": <number 0-10>,
-  "reason": "<justification en 1-2 phrases incluant budget et localisation>"
-}
-        `.trim()
-      }
-    ]);
+    // Utiliser la nouvelle fonction avec structured output
+    const result = await analyzeSemanticRelevance(ao, keywordDetails);
     
-    const result = JSON.parse(analysis.text);
+    // Calculer les jours restants
+    const daysRemaining = getDaysRemaining(ao.deadline || '');
     
     console.log(`✅ Score sémantique: ${result.score}/10 - ${ao.title}`);
+    if (result.details) {
+      console.log(`  → Recommandation: ${result.details.recommandation}`);
+      console.log(`  → Critères Balthazar: ${result.details.criteres_balthazar.total_valides}/4`);
+    }
     
     return {
       ao: {
         ...ao,
         semanticScore: result.score,
         semanticReason: result.reason,
-        procedureType: ao.raw_json?.procedure_libelle || null
-      },
-      client
-    };
-  }
-});
-
-// ──────────────────────────────────────────────────
-// STEP : ANALYSE FAISABILITÉ D'UN SEUL AO
-// ──────────────────────────────────────────────────
-const analyzeOneAOFeasibilityStep = createStep({
-  id: 'analyze-one-ao-feasibility',
-  inputSchema: z.object({
-    ao: aoSchema.extend({
-      keywordScore: z.number(),
-      matchedKeywords: z.array(z.string()),
-      semanticScore: z.number(),
-      semanticReason: z.string(),
-      procedureType: z.string().nullable(),
-      _isRectification: z.boolean().optional(),
-      _originalAO: z.any().optional(),
-      _changes: z.any().optional()
-    }),
-    client: clientSchema
-  }),
-  outputSchema: z.object({
-    ao: aoSchema.extend({
-      keywordScore: z.number(),
-      matchedKeywords: z.array(z.string()),
-      semanticScore: z.number(),
-      semanticReason: z.string(),
-      procedureType: z.string().nullable(),
-      feasibility: z.object({
-        financial: z.boolean(),
-        technical: z.boolean(),
-        timing: z.boolean(),
-        blockers: z.array(z.string()),
-        confidence: z.enum(['high', 'medium', 'low'])
-      }),
-      isFeasible: z.boolean(),
-      warnings: z.array(z.string()),
-      daysRemaining: z.number(),
-      hasCorrectif: z.boolean(),
-      isRenewal: z.boolean(),
-      _isRectification: z.boolean().optional(),
-      _originalAO: z.any().optional(),
-      _changes: z.any().optional()
-    }),
-    client: clientSchema
-  }),
-  execute: async ({ inputData, mastra }) => {
-    const { ao, client } = inputData;
-    
-    console.log(`🔍 Analyse faisabilité de l'AO: ${ao.title}`);
-    
-    // Utilisation de l'agent spécialisé boampFeasibilityAnalyzer
-    const feasibilityAgent = mastra?.getAgent('boampFeasibilityAnalyzer');
-    if (!feasibilityAgent) {
-      throw new Error('Agent boampFeasibilityAnalyzer not found');
-    }
-    
-    // Calcul des jours restants
-    const daysRemaining = getDaysRemaining(ao.deadline || '');
-    
-    // Parse les critères depuis le JSON "donnees"
-    let criteres = null;
-    try {
-      if (ao.raw_json?.donnees) {
-        const donneesObj = typeof ao.raw_json.donnees === 'string'
-          ? JSON.parse(ao.raw_json.donnees)
-          : ao.raw_json.donnees;
-        criteres = donneesObj?.CONDITION_PARTICIPATION || null;
-      }
-    } catch (e) {
-      console.warn(`Failed to parse donnees for ${ao.source_id}:`, e);
-    }
-    
-    // Warnings et context additionnels
-    const warnings: string[] = [];
-    let additionalContext = '';
-    
-    if (ao.raw_json?.annonce_lie) {
-      warnings.push("⚠️ Cet AO a fait l'objet d'un correctif");
-      additionalContext += `\nAnnonce liée (correctif): ${ao.raw_json.annonce_lie}`;
-    }
-    
-    if (ao.raw_json?.annonces_anterieures) {
-      additionalContext += '\nRenouvellement d\'un marché existant - peut être plus facile à gagner si on connaît l\'historique';
-      warnings.push("ℹ️ Renouvellement de marché existant");
-    }
-    
-    const analysis = await feasibilityAgent.generate([
-      {
-        role: 'user',
-        content: `
-Profil client:
-- Nom: ${client.name}
-- CA annuel: ${client.financial.revenue}€
-- Effectif: ${client.financial.employees} personnes
-- Années d'expérience: ${client.financial.yearsInBusiness}
-- Références similaires: ${client.technical.references} projets
-- Budget minimum ciblé: ${client.criteria.minBudget}€
-- Régions d'intervention: ${client.criteria.regions?.join(', ') || 'National'}
-
-Appel d'offres:
-- Titre: ${ao.title}
-- Budget max: ${ao.budget_max ? `${ao.budget_max}€` : 'Non spécifié'}
-- Délai restant: ${daysRemaining} jours
-
-Critères de participation (extraits du BOAMP):
-${JSON.stringify(criteres, null, 2)}
-${additionalContext}
-
-Questions:
-1. Le client respecte-t-il les critères financiers (CA minimum, garanties) ?
-2. Le client respecte-t-il les critères techniques (références, certifications, effectif) ?
-3. Le délai est-il réaliste pour préparer une réponse de qualité ?
-
-Réponds UNIQUEMENT en JSON:
-{
-  "financial": <boolean>,
-  "technical": <boolean>,
-  "timing": <boolean>,
-  "blockers": [<liste des blockers si applicable>],
-  "confidence": <"high"|"medium"|"low">
-}
-        `.trim()
-      }
-    ]);
-    
-    const feasibility = JSON.parse(analysis.text);
-    const isFeasible = feasibility.financial && feasibility.technical && feasibility.timing;
-    
-    console.log(`✅ Faisabilité: ${isFeasible ? 'OUI' : 'NON'} - ${ao.title}`);
-    
-    return {
-      ao: {
-        ...ao,
-        feasibility,
-        isFeasible,
-        warnings,
-        daysRemaining,
-        hasCorrectif: !!ao.raw_json?.annonce_lie,
-        isRenewal: !!ao.raw_json?.annonces_anterieures
+        semanticDetails: result.details,
+        procedureType: ao.raw_json?.procedure_libelle || null,
+        daysRemaining
       },
       client
     };
@@ -1269,14 +1056,6 @@ const scoreOneAOStep = createStep({
       matchedKeywords: z.array(z.string()),
       semanticScore: z.number(),
       semanticReason: z.string(),
-      feasibility: z.object({
-        financial: z.boolean(),
-        technical: z.boolean(),
-        timing: z.boolean(),
-        blockers: z.array(z.string()),
-        confidence: z.enum(['high', 'medium', 'low'])
-      }),
-      isFeasible: z.boolean(),
       daysRemaining: z.number(),
       _isRectification: z.boolean().optional(),
       _originalAO: z.any().optional(),
@@ -1290,14 +1069,6 @@ const scoreOneAOStep = createStep({
       matchedKeywords: z.array(z.string()),
       semanticScore: z.number(),
       semanticReason: z.string(),
-      feasibility: z.object({
-        financial: z.boolean(),
-        technical: z.boolean(),
-        timing: z.boolean(),
-        blockers: z.array(z.string()),
-        confidence: z.enum(['high', 'medium', 'low'])
-      }),
-      isFeasible: z.boolean(),
       finalScore: z.number(),
       priority: z.enum(['HIGH', 'MEDIUM', 'LOW']),
       _isRectification: z.boolean().optional(),
@@ -1314,15 +1085,13 @@ const scoreOneAOStep = createStep({
     // Calcul score global (0-10)
     // Utiliser keywordDetails si disponible (nouveau scoring), sinon fallback
     const keywordContribution = (ao as any).keywordDetails
-      ? ((ao as any).keywordDetails.score / 100) * 0.25  // Nouveau: 25% du score (0-100 → 0-10)
-      : (ao.keywordScore * 10) * 0.2;                    // Ancien: 20% (backward compat)
+      ? ((ao as any).keywordDetails.score / 100) * 0.30  // Nouveau: 30% du score (0-100 → 0-10)
+      : (ao.keywordScore * 10) * 0.25;                    // Ancien: 25% (backward compat)
     
     const score = (
-      ao.semanticScore * 0.35 +              // Pertinence: 35% (réduit de 40%)
-      keywordContribution +                   // Keywords: 20-25% (selon version)
-      (ao.feasibility.confidence === 'high' ? 10 : 
-       ao.feasibility.confidence === 'medium' ? 7 : 4) * 0.30 + // Faisabilité: 30%
-      (1 - Math.min(ao.daysRemaining / 60, 1)) * 10 * 0.10  // Urgence: 10% (réduit de 10%)
+      ao.semanticScore * 0.50 +              // Pertinence: 50% (augmenté de 35%)
+      keywordContribution +                   // Keywords: 25-30% (augmenté de 20-25%)
+      (1 - Math.min(ao.daysRemaining / 60, 1)) * 10 * 0.20  // Urgence: 20% (augmenté de 10%)
     );
     
     // Priorisation
@@ -1373,14 +1142,6 @@ const analyzeAOCompleteWorkflow = createWorkflow({
       matchedKeywords: z.array(z.string()),
       semanticScore: z.number(),
       semanticReason: z.string(),
-      feasibility: z.object({
-        financial: z.boolean(),
-        technical: z.boolean(),
-        timing: z.boolean(),
-        blockers: z.array(z.string()),
-        confidence: z.enum(['high', 'medium', 'low'])
-      }),
-      isFeasible: z.boolean(),
       finalScore: z.number(),
       priority: z.enum(['HIGH', 'MEDIUM', 'LOW', 'CANCELLED']),
       _isRectification: z.boolean().optional(),
@@ -1391,7 +1152,6 @@ const analyzeAOCompleteWorkflow = createWorkflow({
   })
 })
   .then(analyzeOneAOSemanticStep)
-  .then(analyzeOneAOFeasibilityStep)
   .then(scoreOneAOStep)
   .commit();
 
@@ -1418,14 +1178,6 @@ const processOneAOWorkflow = createWorkflow({
       matchedKeywords: z.array(z.string()),
       semanticScore: z.number().optional(),
       semanticReason: z.string().optional(),
-      feasibility: z.object({
-        financial: z.boolean(),
-        technical: z.boolean(),
-        timing: z.boolean(),
-        blockers: z.array(z.string()),
-        confidence: z.enum(['high', 'medium', 'low'])
-      }).optional(),
-      isFeasible: z.boolean().optional(),
       finalScore: z.number(),
       priority: z.enum(['HIGH', 'MEDIUM', 'LOW', 'CANCELLED']),
       _isRectification: z.boolean().optional(),
@@ -1498,7 +1250,7 @@ const processOneAOWorkflow = createWorkflow({
     // ────────────────────────────────────────────────────
     // Critère : _isRectification === true && isSubstantial
     // Action : Pipeline LLM complet avec contexte de comparaison
-    // Coût LLM : 2 appels (semantic + feasibility)
+    // Coût LLM : 1 appel (semantic)
     [
       async ({ inputData }) => {
         const isSubstantialRectif = 
@@ -1518,7 +1270,7 @@ const processOneAOWorkflow = createWorkflow({
     // ────────────────────────────────────────────────────
     // Critère : true (default, tous les autres cas)
     // Action : Pipeline LLM complet standard
-    // Coût LLM : 2 appels (semantic + feasibility)
+    // Coût LLM : 1 appel (semantic)
     [
       async ({ inputData }) => {
         console.log(`🔀 Branch 4: NOUVEL AO - ${inputData.ao.title}`);
@@ -1599,8 +1351,8 @@ const aggregateResultsStep = createStep({
     // - Branch 1 (annulé) : 0 appel LLM
     // - Branch 2 (rectificatif mineur) : 0 appel LLM (conserve score original)
     // - Branch 2.5 (skip LLM) : 0 appel LLM (score keywords uniquement)
-    // - Branch 3 (rectificatif substantiel) : 2 appels LLM (semantic + feasibility)
-    // - Branch 4 (nouvel AO) : 2 appels LLM (semantic + feasibility)
+    // - Branch 3 (rectificatif substantiel) : 1 appel LLM (semantic)
+    // - Branch 4 (nouvel AO) : 1 appel LLM (semantic)
     // 
     // Les AO avec semanticScore défini ont été analysés par LLM
     // Exclure les AO avec _skipLLM === true (skip LLM, pas d'analyse)
@@ -1610,7 +1362,7 @@ const aggregateResultsStep = createStep({
       ao.priority !== 'CANCELLED' &&
       !(ao as any)._skipLLM
     );
-    const llmCalls = aoWithLLMAnalysis.length * 2; // 2 appels par AO (semantic + feasibility)
+    const llmCalls = aoWithLLMAnalysis.length * 1; // 1 appel par AO (semantic)
     
     // ────────────────────────────────────────────────────────────
     // 5. LOGS RÉCAPITULATIFS

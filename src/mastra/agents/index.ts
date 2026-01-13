@@ -6,5 +6,4 @@
 
 // Agents spécialisés pour l'analyse BOAMP
 export { boampSemanticAnalyzer } from "./boamp-semantic-analyzer";
-export { boampFeasibilityAnalyzer } from "./boamp-feasibility-analyzer";
 

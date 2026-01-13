@@ -2,8 +2,7 @@ import { Mastra } from "@mastra/core/mastra";
 
 // Import agents
 import { 
-  boampSemanticAnalyzer,
-  boampFeasibilityAnalyzer
+  boampSemanticAnalyzer
 } from "./agents";
 
 // Import workflows
@@ -24,7 +23,6 @@ import { aoVeilleWorkflow } from "./workflows";
  * 
  * Agents:
  * - boampSemanticAnalyzer: Semantic analysis of BOAMP tenders (Step 2b) - uses GPT-4o-mini
- * - boampFeasibilityAnalyzer: Feasibility analysis of BOAMP tenders (Step 3) - uses GPT-4o
  * 
  * Workflows:
  * - aoVeilleWorkflow: Complete pipeline from BOAMP fetch to analysis and storage
@@ -33,7 +31,6 @@ export const mastra = new Mastra({
   agents: {
     // Agents spécialisés pour l'analyse BOAMP
     boampSemanticAnalyzer,
-    boampFeasibilityAnalyzer,
   },
   workflows: {
     aoVeilleWorkflow,
