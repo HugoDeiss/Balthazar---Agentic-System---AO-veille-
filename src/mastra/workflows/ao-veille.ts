@@ -385,8 +385,7 @@ const handleCancellationsStep = createStep({
               url_ao: ao.url_ao,
               etat: 'AVIS_ANNULE',
               status: 'cancelled',
-              raw_json: ao.raw_json,
-              updated_at: new Date().toISOString()
+              raw_json: ao.raw_json
             }, {
               onConflict: 'source_id',
               ignoreDuplicates: false
@@ -511,8 +510,7 @@ const detectRectificationStep = createStep({
                 deadline: ao.deadline,
                 raw_json: ao.raw_json,
                 rectification_date: new Date().toISOString(),
-                rectification_count: (originalAO.rectification_count || 0) + 1,
-                updated_at: new Date().toISOString()
+                rectification_count: (originalAO.rectification_count || 0) + 1
               })
               .eq('id', originalAO.id);
             
@@ -1029,8 +1027,7 @@ const handleCancellationAOStep = createStep({
         .from('appels_offres')
         .update({
           etat: 'AVIS_ANNULE',
-          status: 'cancelled',
-          updated_at: new Date().toISOString()
+          status: 'cancelled'
         })
         .eq('source_id', ao.source_id);
       
@@ -1111,8 +1108,7 @@ const handleMinorRectificationAOStep = createStep({
           dedup_key: dedupKeys.composite_key,
           siret_deadline_key: dedupKeys.siret_deadline_key,
           rectification_date: new Date().toISOString(),
-          rectification_count: (ao._originalAO?.rectification_count || 0) + 1,
-          updated_at: new Date().toISOString()
+          rectification_count: (ao._originalAO?.rectification_count || 0) + 1
         })
         .eq('id', ao._originalAO?.id);
       
@@ -1691,7 +1687,7 @@ const aggregateResultsStep = createStep({
     console.log(`   🔥 HIGH: ${high.length} AO`);
     console.log(`   🟡 MEDIUM: ${medium.length} AO`);
     console.log(`   🟢 LOW: ${low.length} AO`);
-    console.log(`   💰 Appels LLM: ${llmCalls} (${aoWithLLMAnalysis.length} AO × 2)`);
+    console.log(`   💰 Appels LLM: ${llmCalls} (${aoWithLLMAnalysis.length} AO × 1)`);
     
     // ────────────────────────────────────────────────────────────
     // 6. RETOUR DE L'OBJET STRUCTURÉ
