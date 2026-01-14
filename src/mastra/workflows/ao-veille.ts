@@ -13,6 +13,8 @@ import { scheduleRetry } from '../../utils/retry-scheduler';
 import { calculateKeywordScore, calculateEnhancedKeywordScore, shouldSkipLLM } from '../../utils/balthazar-keywords';
 import { analyzeSemanticRelevance } from '../agents/boamp-semantic-analyzer';
 import { findBatchBOAMPMatches } from '../../utils/cross-platform-dedup';
+import { generateEmailHTML, generateEmailText, generateEmailSubject, type EmailData } from '../../utils/email-templates';
+import { sendEmail } from '../../utils/email-sender';
 
 // ──────────────────────────────────────────────────
 // SUPABASE CLIENT
@@ -769,7 +771,33 @@ const saveResultsStep = createStep({
       low: z.number(),
       llmCalls: z.number()
     }),
-    client: clientSchema.nullable()
+    client: clientSchema.nullable(),
+    statsBySource: z.object({
+      BOAMP: z.object({
+        total: z.number(),
+        high: z.number(),
+        medium: z.number(),
+        low: z.number()
+      }),
+      MARCHESONLINE: z.object({
+        total: z.number(),
+        high: z.number(),
+        medium: z.number(),
+        low: z.number()
+      })
+    }),
+    highBySource: z.object({
+      BOAMP: z.array(z.any()),
+      MARCHESONLINE: z.array(z.any())
+    }),
+    mediumBySource: z.object({
+      BOAMP: z.array(z.any()),
+      MARCHESONLINE: z.array(z.any())
+    }),
+    lowBySource: z.object({
+      BOAMP: z.array(z.any()),
+      MARCHESONLINE: z.array(z.any())
+    })
   }),
   outputSchema: z.object({
     saved: z.number(),
@@ -777,7 +805,34 @@ const saveResultsStep = createStep({
     medium: z.number(),
     low: z.number(),
     cancelled: z.number(),
-    llmCalls: z.number()
+    llmCalls: z.number(),
+    statsBySource: z.object({
+      BOAMP: z.object({
+        total: z.number(),
+        high: z.number(),
+        medium: z.number(),
+        low: z.number()
+      }),
+      MARCHESONLINE: z.object({
+        total: z.number(),
+        high: z.number(),
+        medium: z.number(),
+        low: z.number()
+      })
+    }),
+    highBySource: z.object({
+      BOAMP: z.array(z.any()),
+      MARCHESONLINE: z.array(z.any())
+    }),
+    mediumBySource: z.object({
+      BOAMP: z.array(z.any()),
+      MARCHESONLINE: z.array(z.any())
+    }),
+    lowBySource: z.object({
+      BOAMP: z.array(z.any()),
+      MARCHESONLINE: z.array(z.any())
+    }),
+    client: clientSchema.nullable()
   }),
   execute: async ({ inputData }) => {
     const { all: scored, client, stats } = inputData;
@@ -791,7 +846,12 @@ const saveResultsStep = createStep({
         medium: stats.medium,
         low: stats.low,
         cancelled: stats.cancelled,
-        llmCalls: stats.llmCalls
+        llmCalls: stats.llmCalls,
+        statsBySource: inputData.statsBySource,
+        highBySource: inputData.highBySource,
+        mediumBySource: inputData.mediumBySource,
+        lowBySource: inputData.lowBySource,
+        client: null
       };
     }
     
@@ -990,8 +1050,175 @@ const saveResultsStep = createStep({
       medium: stats.medium,
       low: stats.low,
       cancelled: stats.cancelled,
-      llmCalls: stats.llmCalls
+      llmCalls: stats.llmCalls,
+      statsBySource: inputData.statsBySource,
+      highBySource: inputData.highBySource,
+      mediumBySource: inputData.mediumBySource,
+      lowBySource: inputData.lowBySource,
+      client: inputData.client
     };
+  }
+});
+
+// ──────────────────────────────────────────────────
+// STEP : ENVOI EMAIL RÉCAPITULATIF
+// ──────────────────────────────────────────────────
+const sendEmailStep = createStep({
+  id: 'send-email',
+  inputSchema: z.object({
+    saved: z.number(),
+    high: z.number(),
+    medium: z.number(),
+    low: z.number(),
+    cancelled: z.number(),
+    llmCalls: z.number(),
+    statsBySource: z.object({
+      BOAMP: z.object({
+        total: z.number(),
+        high: z.number(),
+        medium: z.number(),
+        low: z.number()
+      }),
+      MARCHESONLINE: z.object({
+        total: z.number(),
+        high: z.number(),
+        medium: z.number(),
+        low: z.number()
+      })
+    }),
+    highBySource: z.object({
+      BOAMP: z.array(z.any()),
+      MARCHESONLINE: z.array(z.any())
+    }),
+    mediumBySource: z.object({
+      BOAMP: z.array(z.any()),
+      MARCHESONLINE: z.array(z.any())
+    }),
+    lowBySource: z.object({
+      BOAMP: z.array(z.any()),
+      MARCHESONLINE: z.array(z.any())
+    }),
+    client: clientSchema.nullable()
+  }),
+  outputSchema: z.object({
+    emailSent: z.boolean()
+  }),
+  execute: async ({ inputData }) => {
+    // ────────────────────────────────────────────────────────────
+    // 1. VÉRIFICATION PRÉALABLE
+    // ────────────────────────────────────────────────────────────
+    if (!inputData.client) {
+      console.log(`⚠️ Pas de client disponible, email non envoyé`);
+      return { emailSent: false };
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // 2. CALCUL DE LA DATE (date d'aujourd'hui - date du rapport)
+    // ────────────────────────────────────────────────────────────
+    const today = new Date();
+    const dateStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
+
+    // ────────────────────────────────────────────────────────────
+    // 3. ORGANISATION DES DONNÉES POUR LE TEMPLATE
+    // ────────────────────────────────────────────────────────────
+    // Combiner HIGH et MEDIUM de toutes les sources
+    const relevantAOs: EmailData['relevantAOs'] = [];
+    
+    // Ajouter HIGH et MEDIUM de BOAMP
+    [...inputData.highBySource.BOAMP, ...inputData.mediumBySource.BOAMP].forEach(ao => {
+      relevantAOs.push({
+        source: 'BOAMP',
+        title: ao.title || 'Sans titre',
+        url: ao.url_ao || '#',
+        semanticReason: ao.semanticReason || ao.semantic_reason || 'Aucune justification disponible',
+        priority: ao.priority === 'HIGH' ? 'HIGH' : 'MEDIUM',
+        acheteur: ao.acheteur,
+        deadline: ao.deadline
+      });
+    });
+    
+    // Ajouter HIGH et MEDIUM de MarchesOnline
+    [...inputData.highBySource.MARCHESONLINE, ...inputData.mediumBySource.MARCHESONLINE].forEach(ao => {
+      relevantAOs.push({
+        source: 'MARCHESONLINE',
+        title: ao.title || 'Sans titre',
+        url: ao.url_ao || '#',
+        semanticReason: ao.semanticReason || ao.semantic_reason || 'Aucune justification disponible',
+        priority: ao.priority === 'HIGH' ? 'HIGH' : 'MEDIUM',
+        acheteur: ao.acheteur,
+        deadline: ao.deadline
+      });
+    });
+
+    // Extraire LOW de toutes les sources
+    const lowPriorityAOs: EmailData['lowPriorityAOs'] = [];
+    
+    [...inputData.lowBySource.BOAMP, ...inputData.lowBySource.MARCHESONLINE].forEach(ao => {
+      // Extraire la raison de faible priorité
+      // Priorité : rejected_reason > semanticReason > message générique
+      let reason: string | undefined;
+      if ((ao as any).rejected_reason) {
+        reason = (ao as any).rejected_reason;
+      } else if (ao.semanticReason || (ao as any).semantic_reason) {
+        reason = ao.semanticReason || (ao as any).semantic_reason;
+      } else if ((ao as any)._skipLLM) {
+        reason = 'Score keywords insuffisant pour une analyse approfondie';
+      } else {
+        reason = 'Analyse sémantique indique une pertinence limitée pour Balthazar';
+      }
+      
+      lowPriorityAOs.push({
+        source: ao.source || 'UNKNOWN',
+        title: ao.title || 'Sans titre',
+        url: ao.url_ao || '#',
+        reason
+      });
+    });
+
+    // Déterminer la raison si aucun AO analysé
+    let noAOsReason: string | undefined;
+    const totalAnalyzed = inputData.statsBySource.BOAMP.total + inputData.statsBySource.MARCHESONLINE.total;
+    if (totalAnalyzed === 0) {
+      noAOsReason = 'Aucun appel d\'offres n\'a été trouvé pour cette date, ou tous les AO ont été filtrés (déjà analysés, annulés, etc.).';
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // 4. PRÉPARATION DES DONNÉES POUR LE TEMPLATE
+    // ────────────────────────────────────────────────────────────
+    const emailData: EmailData = {
+      date: dateStr,
+      statsBySource: inputData.statsBySource,
+      relevantAOs,
+      lowPriorityAOs,
+      noAOsReason
+    };
+
+    // ────────────────────────────────────────────────────────────
+    // 5. GÉNÉRATION DU CONTENU EMAIL
+    // ────────────────────────────────────────────────────────────
+    try {
+      const htmlBody = generateEmailHTML(emailData);
+      const textBody = generateEmailText(emailData);
+      const subject = generateEmailSubject(emailData);
+
+      // ────────────────────────────────────────────────────────────
+      // 6. ENVOI DE L'EMAIL
+      // ────────────────────────────────────────────────────────────
+      const result = await sendEmail(subject, htmlBody, textBody);
+
+      if (result.success) {
+        console.log(`✅ Email récapitulatif envoyé avec succès`);
+        return { emailSent: true };
+      } else {
+        console.error(`❌ Échec envoi email: ${result.error}`);
+        // Ne pas faire échouer le workflow si l'email échoue
+        return { emailSent: false };
+      }
+    } catch (error: any) {
+      console.error(`❌ Exception lors de la génération/envoi email:`, error?.message || error);
+      // Ne pas faire échouer le workflow si l'email échoue
+      return { emailSent: false };
+    }
   }
 });
 
@@ -1611,7 +1838,33 @@ const aggregateResultsStep = createStep({
       low: z.number(),
       llmCalls: z.number()
     }),
-    client: clientSchema.nullable()
+    client: clientSchema.nullable(),
+    statsBySource: z.object({
+      BOAMP: z.object({
+        total: z.number(),
+        high: z.number(),
+        medium: z.number(),
+        low: z.number()
+      }),
+      MARCHESONLINE: z.object({
+        total: z.number(),
+        high: z.number(),
+        medium: z.number(),
+        low: z.number()
+      })
+    }),
+    highBySource: z.object({
+      BOAMP: z.array(z.any()),
+      MARCHESONLINE: z.array(z.any())
+    }),
+    mediumBySource: z.object({
+      BOAMP: z.array(z.any()),
+      MARCHESONLINE: z.array(z.any())
+    }),
+    lowBySource: z.object({
+      BOAMP: z.array(z.any()),
+      MARCHESONLINE: z.array(z.any())
+    })
   }),
   execute: async ({ inputData }) => {
     console.log(`📊 Agrégation de ${inputData.length} AO traités...`);
@@ -1639,7 +1892,14 @@ const aggregateResultsStep = createStep({
           low: 0,
           llmCalls: 0
         },
-        client: null
+        client: null,
+        statsBySource: {
+          BOAMP: { total: 0, high: 0, medium: 0, low: 0 },
+          MARCHESONLINE: { total: 0, high: 0, medium: 0, low: 0 }
+        },
+        highBySource: { BOAMP: [], MARCHESONLINE: [] },
+        mediumBySource: { BOAMP: [], MARCHESONLINE: [] },
+        lowBySource: { BOAMP: [], MARCHESONLINE: [] }
       };
     }
     
@@ -1660,6 +1920,24 @@ const aggregateResultsStep = createStep({
     const medium = allAOs.filter(ao => ao.priority === 'MEDIUM');
     const low = allAOs.filter(ao => ao.priority === 'LOW');
     const cancelled = allAOs.filter(ao => ao.priority === 'CANCELLED');
+    
+    // ────────────────────────────────────────────────────────────
+    // 3.5. SÉPARATION PAR SOURCE (pour email)
+    // ────────────────────────────────────────────────────────────
+    const highBySource = {
+      BOAMP: high.filter(ao => ao.source === 'BOAMP'),
+      MARCHESONLINE: high.filter(ao => ao.source === 'MARCHESONLINE')
+    };
+    
+    const mediumBySource = {
+      BOAMP: medium.filter(ao => ao.source === 'BOAMP'),
+      MARCHESONLINE: medium.filter(ao => ao.source === 'MARCHESONLINE')
+    };
+    
+    const lowBySource = {
+      BOAMP: low.filter(ao => ao.source === 'BOAMP'),
+      MARCHESONLINE: low.filter(ao => ao.source === 'MARCHESONLINE')
+    };
     
     // ────────────────────────────────────────────────────────────
     // 4. CALCUL DES STATISTIQUES
@@ -1685,6 +1963,27 @@ const aggregateResultsStep = createStep({
       !(ao as any)._skipLLM
     );
     const llmCalls = aoWithLLMAnalysis.length * 1; // 1 appel par AO (semantic)
+    
+    // ────────────────────────────────────────────────────────────
+    // 4.5. CALCUL STATS PAR SOURCE
+    // ────────────────────────────────────────────────────────────
+    const boampAOs = allAOs.filter(ao => ao.source === 'BOAMP');
+    const marchesonlineAOs = allAOs.filter(ao => ao.source === 'MARCHESONLINE');
+    
+    const statsBySource = {
+      BOAMP: {
+        total: boampAOs.length,
+        high: highBySource.BOAMP.length,
+        medium: mediumBySource.BOAMP.length,
+        low: lowBySource.BOAMP.length
+      },
+      MARCHESONLINE: {
+        total: marchesonlineAOs.length,
+        high: highBySource.MARCHESONLINE.length,
+        medium: mediumBySource.MARCHESONLINE.length,
+        low: lowBySource.MARCHESONLINE.length
+      }
+    };
     
     // ────────────────────────────────────────────────────────────
     // 5. LOGS RÉCAPITULATIFS
@@ -1719,7 +2018,11 @@ const aggregateResultsStep = createStep({
         low: low.length,
         llmCalls
       },
-      client
+      client,
+      statsBySource,
+      highBySource,
+      mediumBySource,
+      lowBySource
     };
   }
 });
@@ -1799,4 +2102,9 @@ export const aoVeilleWorkflow = createWorkflow({
   // PHASE 5 : SAUVEGARDE
   // ═══════════════════════════════════════════════════════
   .then(saveResultsStep)
+  
+  // ═══════════════════════════════════════════════════════
+  // PHASE 6 : ENVOI EMAIL RÉCAPITULATIF
+  // ═══════════════════════════════════════════════════════
+  .then(sendEmailStep)
   .commit();
