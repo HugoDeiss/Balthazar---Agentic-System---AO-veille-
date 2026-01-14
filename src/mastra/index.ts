@@ -36,7 +36,12 @@ export const mastra = new Mastra({
     aoVeilleWorkflow,
   },
   bundler: {
-    externals: ["xmlbuilder"],
+    externals: [
+      "xmlbuilder",
+      "rss-parser",
+      "@supabase/supabase-js",
+      "resend",
+    ],
   },
   server: {
     port: 4111,
