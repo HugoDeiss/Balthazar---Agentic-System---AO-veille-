@@ -25,15 +25,15 @@
     "test:retry:all": "npm run test:retry:mock && npm run test:retry:scheduler && npm run test:retry:metrics && npm run test:retry:consistency",
     "test:boamp:uuid": "tsx scripts/test-boamp-uuid-extraction.ts",
     "test:marchesonline:dedup": "tsx scripts/test-marchesonline-dedup.ts",
-    "test:integration": "npm run test:retry:mock && npm run test:retry:scheduler && npm run test:retry:metrics && npm run test:retry:consistency",
-    "test:unit": "npm run test:filter:all && npm run test:scheduler:unit",
     "test:integration": "npm run test:retry:all",
+    "test:unit": "npm run test:filter:all && npm run test:scheduler:unit",
     "test:all": "npm run test:unit && npm run test:integration"
   },
   "dependencies": {
     "@ai-sdk/openai": "latest",
     "@mastra/core": "latest",
     "@supabase/supabase-js": "^2.89.0",
+    "resend": "^6.7.0",
     "rss-parser": "^3.13.0",
     "zod": "^3.25.67"
   },
