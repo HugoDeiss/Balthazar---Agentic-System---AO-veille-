@@ -1,576 +1,1188 @@
 # 🔄 Workflow AO Veille - Analyse Intelligente des Appels d'Offres
 
-**Documentation technique du workflow d'analyse automatique des AO avec agents IA.**
+**Documentation technique complète du workflow Mastra d'analyse automatique des AO avec agents IA.**
 
 ---
 
 ## 🎯 Objectif
 
-Analyser automatiquement les appels d'offres BOAMP pour identifier les opportunités pertinentes et faisables pour Balthazar, en utilisant des agents IA spécialisés.
+Analyser automatiquement les appels d'offres BOAMP et MarchesOnline pour identifier les opportunités pertinentes et faisables pour Balthazar, en utilisant des **agents IA spécialisés** orchestrés par le framework **Mastra**.
 
 ---
 
-## 🏗️ Architecture du Workflow
+## 🏗️ Architecture Mastra Workflow
 
-### Fichier Principal
+### Structure du Workflow
 
-**`src/mastra/workflows/ao-veille.ts`**
+Le workflow `aoVeilleWorkflow` est construit avec l'API Mastra `createWorkflow` :
 
-### Pipeline Complet
-
+```typescript
+// src/mastra/workflows/ao-veille.ts
+export const aoVeilleWorkflow = createWorkflow({
+  id: 'aoVeilleWorkflow',
+  inputSchema: z.object({
+    clientId: z.string(),
+    since: z.string().optional(),
+    marchesonlineRSSUrls: z.array(z.string().url()).optional()
+  }),
+  outputSchema: z.object({
+    saved: z.number(),
+    high: z.number(),
+    medium: z.number(),
+    low: z.number(),
+    cancelled: z.number(),
+    llmCalls: z.number()
+  })
+})
+  .then(fetchAndPrequalifyStep)
+  .then(handleCancellationsStep)
+  .then(detectRectificationStep)
+  .then(filterAlreadyAnalyzedStep)
+  .then(keywordMatchingStep)
+  .map(async ({ inputData }) => {
+    // Transformation pour .foreach()
+  })
+  .foreach(processOneAOWorkflow, { concurrency: 10 })
+  .then(normalizeBranchResultsStep)
+  .then(aggregateResultsStep)
+  .then(saveResultsStep)
+  .then(sendEmailStep)
+  .commit();
 ```
-1. fetch-and-prequalify       (Collecte BOAMP)
-          ↓
-2. handle-cancellations       (Gestion annulations)
-          ↓
-3. detect-rectification       (Détection rectificatifs)
-          ↓
-4. keyword-matching           (Pré-scoring mots-clés)
-          ↓
-5. semantic-analysis          (Analyse IA - Pertinence)
-          ↓
-6. feasibility-analysis       (Analyse IA - Faisabilité)
-          ↓
-7. scoring                    (Score final + Priorité)
-          ↓
-8. save-results               (Sauvegarde Supabase)
+
+### Composants Mastra Utilisés
+
+1. **`createWorkflow`** : Création du workflow principal avec schémas Zod
+2. **`createStep`** : Création de steps individuels avec validation entrée/sortie
+3. **`.then()`** : Enchaînement séquentiel des steps
+4. **`.map()`** : Transformation des données entre steps
+5. **`.foreach()`** : Traitement parallèle avec workflow imbriqué
+6. **`.branch()`** : Branching conditionnel dans le workflow imbriqué
+
+### Flux de Données Typé
+
+Chaque step a un **schéma Zod d'entrée et de sortie** garantissant :
+- Validation des données à l'entrée
+- Structure garantie à la sortie
+- Typage TypeScript complet
+- Détection d'erreurs à la compilation
+
+---
+
+## 📊 Diagramme de Flux Complet
+
+```mermaid
+graph TB
+    Start([Déclenchement<br/>clientId, since]) --> Fetch[fetchAndPrequalifyStep<br/>Collecte BOAMP + MarchesOnline]
+    Fetch --> Cancellations[handleCancellationsStep<br/>Filtre annulations]
+    Cancellations --> Rectifs[detectRectificationStep<br/>Détecte rectificatifs]
+    Rectifs --> Filter[filterAlreadyAnalyzedStep<br/>Évite re-analyse]
+    Filter --> Keywords[keywordMatchingStep<br/>Pré-scoring mots-clés]
+    Keywords --> Map[.map<br/>Transformation pour foreach]
+    Map --> Foreach[.foreach processOneAOWorkflow<br/>Traitement individuel<br/>concurrency: 10]
+    
+    Foreach --> Branch1[Branch 1: AO Annulé<br/>0€ LLM]
+    Foreach --> Branch2[Branch 2: Rectificatif Mineur<br/>0€ LLM]
+    Foreach --> Branch3[Branch 2.5: Skip LLM<br/>0€ LLM]
+    Foreach --> Branch4[Branch 3/4: Analyse Complète<br/>1 appel LLM]
+    
+    Branch1 --> Normalize[normalizeBranchResultsStep<br/>Normalisation résultats]
+    Branch2 --> Normalize
+    Branch3 --> Normalize
+    Branch4 --> Normalize
+    
+    Normalize --> Aggregate[aggregateResultsStep<br/>Agrégation + Stats]
+    Aggregate --> Save[saveResultsStep<br/>Sauvegarde Supabase]
+    Save --> Email[sendEmailStep<br/>Email récapitulatif]
+    Email --> End([Résultat Final])
+    
+    style Fetch fill:#fff4e1
+    style Keywords fill:#fff4e1
+    style Branch4 fill:#e1f5ff
+    style Foreach fill:#e8f5e9
 ```
 
 ---
 
 ## 📋 Steps Détaillés
 
-### Step 1 : Fetch and Prequalify
+### Step 1 : fetchAndPrequalifyStep
 
-**Fichier** : `fetchAndPrequalifyStep`
+**Rôle** : Collecte initiale depuis BOAMP et MarchesOnline avec déduplication cross-platform.
 
-**Fonction** :
-- Récupère le profil client depuis Supabase
-- Appelle `boamp-fetcher` tool
-- Transmet TOUS les AO (passthrough, pas de filtrage)
+#### Schéma d'Entrée
+
+```typescript
+z.object({
+  clientId: z.string(),
+  since: z.string().optional(),
+  marchesonlineRSSUrls: z.array(z.string().url()).optional()
+})
+```
+
+#### Schéma de Sortie
+
+```typescript
+z.object({
+  prequalified: z.array(aoSchema),
+  client: clientSchema,
+  fetchStatus: z.string(),
+  fetchMissing: z.number()
+})
+```
+
+#### Logique Métier
+
+1. **Récupération Client** : Charge le profil client depuis Supabase (`clients` table)
+2. **Appel Outil BOAMP** : Utilise `boampFetcherTool.execute()` avec :
+   - `since` : Date cible (défaut = veille)
+   - `typeMarche` : Depuis préférences client (`SERVICES`)
+   - `pageSize` : 100 (MAX autorisé par OpenDataSoft)
+3. **Appel Outil MarchesOnline** (optionnel) : Si `marchesonlineRSSUrls` configuré dans client ou input
+4. **Déduplication Cross-Platform** : Utilise `findBatchBOAMPMatches()` pour exclure les doublons MarchesOnline déjà présents dans BOAMP
+5. **Transformation** : Convertit `CanonicalAO[]` → format plat `aoSchema[]` via `canonicalAOToFlatSchema()`
+6. **Planification Retry** : Si `missing > 0`, planifie un retry à 60 min via `scheduleRetry()`
+
+#### Appels aux Outils
+
+```typescript
+// Outil BOAMP
+const boampData = await boampFetcherTool.execute!({
+  since: inputData.since,
+  typeMarche: client.preferences.typeMarche,
+  pageSize: 100
+}, { requestContext });
+
+// Retourne: { records: CanonicalAO[], total_count, fetched, status, ... }
+
+// Outil MarchesOnline (si configuré)
+const marchesonlineData = await marchesonlineRSSFetcherTool.execute!({
+  rssUrls: rssUrls,
+  since: inputData.since,
+  typeMarche: client.preferences.typeMarche
+}, { requestContext });
+
+// Déduplication cross-platform
+const matches = await findBatchBOAMPMatches(
+  marchesonlineData.records.map(ao => ({
+    uuid_procedure: ao.uuid_procedure,
+    title: ao.identity.title,
+    acheteur: ao.identity.acheteur,
+    deadline: ao.lifecycle.deadline,
+    siret: ao.metadata.siret
+  }))
+);
+```
+
+#### Exemple de Données
 
 **Input** :
-```typescript
+```json
 {
-  clientId: string,    // "balthazar"
-  since?: string       // "2025-12-20" (optionnel, default = veille)
+  "clientId": "balthazar",
+  "since": "2025-12-20"
 }
 ```
 
 **Output** :
-```typescript
+```json
 {
-  prequalified: AO[],  // Tous les AO récupérés
-  client: Client,      // Profil client
-  fetchStatus: string, // OK | DEGRADED | ERROR
-  fetchMissing: number // Nombre d'AO manquants
+  "prequalified": [
+    {
+      "source": "BOAMP",
+      "source_id": "26-12345",
+      "title": "Accompagnement transformation digitale",
+      "description": "Mission de conseil...",
+      "keywords": ["conseil", "transformation"],
+      "acheteur": "SNCF",
+      "deadline": "2025-01-15",
+      "region": "Île-de-France",
+      "type_marche": "SERVICES",
+      "raw_json": { /* CanonicalAO complet avec uuid_procedure */ }
+    }
+  ],
+  "client": { /* Profil client */ },
+  "fetchStatus": "COMPLETE",
+  "fetchMissing": 0
 }
-```
-
-**Logs** :
-```
-📥 BOAMP Fetch: 650 AO récupérés
-📊 Total disponible: 650
-📅 Date cible: 2025-12-20
-📊 Statut: OK
-✅ Collecte: 650 AO transmis à l'analyse
 ```
 
 ---
 
-### Step 2 : Handle Cancellations
+### Step 2 : handleCancellationsStep
 
-**Fichier** : `handleCancellationsStep`
+**Rôle** : Filtre et marque les AO annulés en base de données.
 
-**Fonction** :
-- Filtre les AO annulés (`etat = 'AVIS_ANNULE'`)
-- Met à jour la DB (statut = 'cancelled')
-- Ne transmet PAS à l'analyse IA (économie de tokens)
+#### Schéma d'Entrée
 
-**Input** :
 ```typescript
-{
-  prequalified: AO[],
-  client: Client
-}
+z.object({
+  prequalified: z.array(aoSchema),
+  client: clientSchema
+})
 ```
 
-**Output** :
+#### Schéma de Sortie
+
 ```typescript
-{
-  activeAOs: AO[],        // AO actifs (non annulés)
-  cancelledCount: number, // Nombre d'annulations traitées
-  client: Client
-}
+z.object({
+  activeAOs: z.array(aoSchema),
+  cancelledCount: z.number(),
+  client: clientSchema
+})
 ```
 
-**Logs** :
+#### Logique Métier
+
+1. **Détection** : Filtre les AO avec `etat === 'AVIS_ANNULE'` ou détection via `nature_label`/`nature`
+2. **Mise à Jour DB** : Upsert dans `appels_offres` avec :
+   - `status = 'cancelled'`
+   - `etat = 'AVIS_ANNULE'`
+   - Clés de déduplication calculées (`uuid_procedure`, `dedup_key`, `siret_deadline_key`)
+3. **Exclusion** : Ne transmet PAS les AO annulés à l'analyse IA (économie de tokens)
+
+#### Gestion d'Erreurs
+
+- Erreurs DB loggées mais n'interrompent pas le workflow
+- Continue même si certaines annulations échouent
+
+---
+
+### Step 3 : detectRectificationStep
+
+**Rôle** : Détecte les rectificatifs et compare avec l'AO original pour décider si re-analyse nécessaire.
+
+#### Schéma d'Entrée
+
+```typescript
+z.object({
+  activeAOs: z.array(aoSchema),
+  client: clientSchema
+})
 ```
-🚫 Traitement des annulations sur 650 AO...
-❌ AO annulé détecté: Marché XYZ (BOAMP-123)
-✅ AO BOAMP-123 marqué comme annulé en DB
-✅ Annulations: 5 traitées, 645 AO actifs transmis
+
+#### Schéma de Sortie
+
+```typescript
+z.object({
+  toAnalyze: z.array(aoSchema.extend({
+    _isRectification: z.boolean().optional(),
+    _originalAO: z.any().optional(),
+    _changes: z.any().optional()
+  })),
+  rectificationsMineurs: z.number(),
+  rectificationsSubstantiels: z.number(),
+  client: clientSchema
+})
+```
+
+#### Logique Métier
+
+1. **Détection Rectificatif** : Utilise `isRectification(ao)` qui vérifie :
+   - `nature_categorise === 'avis_rectificatif'`
+   - `type_avis` contient "rectificatif"
+   - `annonce_lie IS NOT NULL`
+
+2. **Recherche AO Original** : Utilise `findOriginalAO(rectificationAO)` avec 3 stratégies :
+   - **Stratégie 1** : Recherche directe par `annonce_lie` (optimisé, 1 requête)
+   - **Stratégie 2** : Recherche par acheteur + titre similaire (fallback)
+   - **Stratégie 3** : Recherche par `normalized_id` (si disponible)
+
+3. **Détection Changements Substantiels** : Utilise `detectSubstantialChanges(oldAO, newAO)` qui vérifie :
+   - **Budget** : Variation > 20%
+   - **Deadline** : Décalage > 7 jours
+   - **Critères financiers** : Modification `CAP_ECO` (extrait depuis `raw_json.donnees`)
+   - **Critères techniques** : Modification `CAP_TECH`
+   - **Type de marché** : Changement
+   - **Région** : Changement
+   - **Titre** : Similarité < 80% (distance Levenshtein)
+
+4. **Décision** :
+   - **Changement substantiel** → Re-analyse complète (ajout à `toAnalyze` avec métadonnées `_isRectification`, `_originalAO`, `_changes`)
+   - **Changement mineur** → Simple MAJ DB (deadline, `rectification_count++`)
+
+#### Utilisation des Utilitaires
+
+```typescript
+import {
+  isRectification,
+  findOriginalAO,
+  detectSubstantialChanges,
+  calculateLevenshteinSimilarity
+} from './rectificatif-utils';
 ```
 
 ---
 
-### Step 3 : Detect Rectification
+### Step 4 : filterAlreadyAnalyzedStep
 
-**Fichier** : `detectRectificationStep`
+**Rôle** : Évite la re-analyse des AO déjà traités (optimisation coûts LLM).
 
-**Fonction** :
-- Détecte les rectificatifs (`annonce_lie IS NOT NULL`)
-- Retrouve l'AO original en DB
-- Compare les changements (budget, deadline, etc.)
-- Si changement substantiel → re-analyse
-- Si changement mineur → simple MAJ DB
+#### Schéma d'Entrée
 
-**Input** :
 ```typescript
-{
-  activeAOs: AO[],
-  client: Client
-}
+z.object({
+  toAnalyze: z.array(aoSchema.extend({...})),
+  rectificationsMineurs: z.number(),
+  rectificationsSubstantiels: z.number(),
+  client: clientSchema
+})
 ```
 
-**Output** :
+#### Schéma de Sortie
+
 ```typescript
-{
-  toAnalyze: AO[],                    // AO à analyser (nouveaux + rectifs substantiels)
-  rectificationsMineurs: number,      // Rectifs mineurs (MAJ DB seulement)
-  rectificationsSubstantiels: number, // Rectifs substantiels (re-analyse)
-  client: Client
-}
+z.object({
+  toAnalyze: z.array(aoSchema.extend({...})),
+  rectificationsMineurs: z.number(),
+  rectificationsSubstantiels: z.number(),
+  skipped: z.number(),
+  client: clientSchema
+})
 ```
 
-**Changements Substantiels** :
-- Budget : variation > 10%
-- Deadline : décalage > 7 jours
-- Objet : modification du titre
-- Critères : changement des critères d'attribution
+#### Logique Métier
 
-**Logs** :
-```
-🔍 Détection des rectificatifs sur 645 AO...
-📝 Rectificatif détecté: Marché ABC
-🔗 AO original trouvé (ID: 123)
-⚠️ Changement substantiel: Budget 50k€ → 75k€ (+50%)
-✅ Re-analyse planifiée
-📊 Rectificatifs: 2 mineurs, 1 substantiel
-✅ 644 AO à analyser (nouveaux + rectificatifs substantiels)
-```
+1. **Vérification Batch** : Utilise `checkBatchAlreadyAnalyzed()` pour une seule requête DB optimisée
+2. **Exceptions** :
+   - Rectificatifs substantiels → **TOUJOURS** re-analysés (changement important)
+   - AO annulés déjà analysés → Skip (gérés par step précédent)
+3. **Filtrage** : Exclut les AO avec `status = 'analyzed'` en DB
+
+#### Optimisation
+
+- **Économie** : Évite `keyword matching + LLM` pour les AO déjà analysés
+- **Typique** : ~50% des AO sont déjà analysés → économie significative (~1€/jour)
 
 ---
 
-### Step 4 : Keyword Matching (Pré-scoring)
+### Step 5 : keywordMatchingStep
 
-**Fichier** : `keywordMatchingStep`
+**Rôle** : Pré-scoring basé sur lexique Balthazar (gratuit, non bloquant).
 
-**Fonction** :
-- Calcule un score basé sur les mots-clés client
-- Détecte des signaux faibles (concepts clés)
-- **NON BLOQUANT** : tous les AO passent
-- Produit des signaux pour enrichir l'analyse IA
+#### Schéma d'Entrée
 
-**Input** :
 ```typescript
-{
-  toAnalyze: AO[],
-  client: Client
-}
+z.object({
+  toAnalyze: z.array(aoSchema.extend({...})),
+  rectificationsMineurs: z.number(),
+  rectificationsSubstantiels: z.number(),
+  skipped: z.number().optional(),
+  client: clientSchema
+})
 ```
 
-**Output** :
+#### Schéma de Sortie
+
 ```typescript
-{
-  keywordMatched: AO[],  // Tous les AO avec pré-score
-  client: Client
-}
+z.object({
+  keywordMatched: z.array(aoSchema.extend({
+    keywordScore: z.number(),              // 0-1 (compatible workflow)
+    matchedKeywords: z.array(z.string()),
+    keywordDetails: z.any().optional(),   // Détails complets (score 0-100)
+    _shouldSkipLLM: z.boolean().optional(),
+    _skipLLMPriority: z.enum(['SKIP', 'LOW', 'MEDIUM', 'HIGH']).optional(),
+    _skipLLMReason: z.string().optional(),
+    keywordSignals: z.record(z.boolean()).optional()
+  })),
+  client: clientSchema
+})
 ```
 
-**AO Enrichi** :
+#### Logique Métier
+
+1. **Scoring Keywords** : Utilise `calculateKeywordScore()` :
+   - Analyse titre, description, keywords, acheteur
+   - Lexique Balthazar avec pondérations :
+     - Secteurs cibles : ×3 (mobilités, entreprises à mission, assurance, énergie, service public)
+     - Expertises : ×2 (stratégie, transformation, gouvernance, RSE, etc.)
+     - Red flags : Score 0 (formation catalogue, travaux, IT, fournitures, juridique pur, actuariat)
+
+2. **Scoring Amélioré** : Utilise `calculateEnhancedKeywordScore()` :
+   - Bonus/malus métier
+   - Détection signaux faibles (strategy, transformation, innovation, etc.)
+
+3. **Décision Skip LLM** : Utilise `shouldSkipLLM()` :
+   - Score < 20 → Skip LLM (red flag détecté)
+   - Score < 40 → Skip LLM (faible pertinence)
+   - Score ≥ 40 → Analyse LLM requise
+
+4. **Tri** : Trie par score décroissant (meilleurs AO en premier)
+
+#### Fonctions Utilisées
+
+```typescript
+import {
+  calculateKeywordScore,
+  calculateEnhancedKeywordScore,
+  shouldSkipLLM
+} from '../../utils/balthazar-keywords';
+```
+
+#### Exemple de Données Enrichies
+
 ```typescript
 {
   ...ao,
-  keywordScore: 0.65,              // 65% des mots-clés matchent
+  keywordScore: 0.65,  // 65/100 converti en 0-1 (compatible workflow)
   matchedKeywords: ['conseil', 'transformation', 'digitale'],
+  keywordDetails: {
+    score: 65,
+    confidence: 'HIGH',
+    secteur_matches: [{ category: 'mobilite' }],
+    expertise_matches: [{ category: 'transformation' }, { category: 'strategie' }],
+    red_flags_detected: [],
+    breakdown: {
+      secteur_score: 30,
+      expertise_score: 25,
+      posture_score: 10
+    }
+  },
+  _shouldSkipLLM: false,  // Score suffisant pour LLM
+  _skipLLMPriority: null,
+  _skipLLMReason: null,
   keywordSignals: {
     strategy: true,
     transformation: true,
-    innovation: false,
-    management: true,
-    performance: false,
     conseil: true,
-    audit: false,
-    conduite_changement: true
+    innovation: false
   }
 }
 ```
 
-**Logs** :
+---
+
+### Step 6 : Transformation pour `.foreach()`
+
+**Rôle** : Transformer l'objet `{ keywordMatched: [...], client: {...} }` en tableau pour `.foreach()`.
+
+#### Logique
+
+```typescript
+.map(async ({ inputData }) => {
+  const { keywordMatched, client } = inputData;
+  
+  // Chaque élément contient l'AO ET le client
+  // Le client est dupliqué car Mastra ne partage pas le contexte entre itérations
+  return keywordMatched.map(ao => ({ 
+    ao, 
+    client 
+  }));
+})
 ```
-✅ Keyword matching: 644/644 AO (tous transmis avec pré-score)
-```
+
+**Résultat** : `[{ ao: AO1, client }, { ao: AO2, client }, ...]`
 
 ---
 
-### Step 5 : Semantic Analysis (Agent IA)
+### Step 7 : processOneAOWorkflow (Workflow Imbriqué)
 
-**Fichier** : `semanticAnalysisStep`  
-**Agent** : `boampSemanticAnalyzer`
+**Rôle** : Traite chaque AO individuellement avec un système de **branching conditionnel**.
 
-**Fonction** :
-- Analyse la **pertinence métier** de l'AO pour le client
-- Évalue l'adéquation secteur, expertise, mots-clés
-- Prend en compte budget, région, pré-score
-- Score : 0-10
+#### Architecture du Workflow Imbriqué
 
-**Prompt IA** :
-```
-Profil client:
-- Nom: Balthazar Consulting
-- Mots-clés métier: conseil, stratégie, transformation, digitale, ...
-- Budget minimum: 50 000€
-- Régions cibles: Île-de-France, Auvergne-Rhône-Alpes
-
-Appel d'offres:
-- Titre: Accompagnement transformation digitale
-- Description: ...
-- Budget estimé: 75 000€
-- Région: Île-de-France
-- Pré-score mots-clés: 0.65
-- Signaux détectés: strategy, transformation, conseil, conduite_changement
-
-Question: Sur une échelle de 0 à 10, quelle est la pertinence de cet AO pour ce client ?
-
-Critères d'évaluation:
-1. Adéquation métier (secteur, expertise, mots-clés)
-2. Budget compatible avec les capacités du client
-3. Localisation géographique (priorité aux régions cibles)
-4. Type de procédure (ouvert = accessible)
-5. Signaux faibles détectés par le pré-scoring
-
-Réponds UNIQUEMENT en JSON:
-{
-  "score": 8,
-  "reason": "Excellente adéquation : transformation digitale, budget adapté, région prioritaire"
-}
-```
-
-**Seuil** : Score ≥ 6 pour passer au step suivant
-
-**Input** :
 ```typescript
-{
-  keywordMatched: AO[],
-  client: Client
-}
+const processOneAOWorkflow = createWorkflow({
+  id: 'process-one-ao',
+  inputSchema: z.object({
+    ao: aoSchema.extend({
+      keywordScore: z.number(),
+      matchedKeywords: z.array(z.string()),
+      keywordDetails: z.any().optional(),
+      _shouldSkipLLM: z.boolean().optional(),
+      ...
+    }),
+    client: clientSchema
+  }),
+  outputSchema: z.object({
+    ao: aoSchema.extend({
+      finalScore: z.number(),
+      priority: z.enum(['HIGH', 'MEDIUM', 'LOW', 'CANCELLED'])
+    }),
+    client: clientSchema
+  })
+})
+  .branch([
+    // Branch 1 : AO Annulé
+    [condition1, handleCancellationAOStep],
+    
+    // Branch 2 : Rectificatif Mineur
+    [condition2, handleMinorRectificationAOStep],
+    
+    // Branch 2.5 : Skip LLM
+    [condition3, handleSkipLLMAOStep],
+    
+    // Branch 3/4 : Analyse Complète (LLM)
+    [condition4, analyzeAOCompleteWorkflow]
+  ]);
 ```
 
-**Output** :
+#### Système de Branching
+
+Le workflow utilise `.branch()` avec des conditions évaluées dans l'ordre :
+
+```mermaid
+graph TD
+    Start([AO avec keywordScore]) --> Check1{AO Annulé?}
+    Check1 -->|Oui| Branch1[handleCancellationAOStep<br/>0€ LLM<br/>Status: CANCELLED]
+    Check1 -->|Non| Check2{Rectificatif<br/>Mineur?}
+    Check2 -->|Oui| Branch2[handleMinorRectificationAOStep<br/>0€ LLM<br/>Conserve score original]
+    Check2 -->|Non| Check3{Skip LLM?<br/>score < 40}
+    Check3 -->|Oui| Branch3[handleSkipLLMAOStep<br/>0€ LLM<br/>Score keywords uniquement]
+    Check3 -->|Non| Branch4[analyzeAOCompleteWorkflow<br/>1 appel LLM<br/>Analyse sémantique]
+    
+    Branch1 --> End([Résultat])
+    Branch2 --> End
+    Branch3 --> End
+    Branch4 --> End
+    
+    style Branch1 fill:#ffebee
+    style Branch2 fill:#fff3e0
+    style Branch3 fill:#fff9c4
+    style Branch4 fill:#e1f5ff
+```
+
+#### Branch 1 : AO Annulé
+
+**Condition** :
 ```typescript
-{
-  relevant: AO[],  // AO avec score ≥ 6
-  client: Client
-}
+const isAnnule = 
+  ao.etat === 'AVIS_ANNULE' ||
+  ao.raw_json?.lifecycle?.nature_label?.toLowerCase().includes('annulation') ||
+  ao.raw_json?.lifecycle?.nature?.toLowerCase().includes('annulation');
 ```
 
-**AO Enrichi** :
+**Action** :
+- Mise à jour DB : `status = 'cancelled'`, `etat = 'AVIS_ANNULE'`
+- Retour : `priority = 'CANCELLED'`, `finalScore = 0`
+- **Coût LLM** : 0€
+
+#### Branch 2 : Rectificatif Mineur
+
+**Condition** :
 ```typescript
-{
-  ...ao,
-  semanticScore: 8,
-  semanticReason: "Excellente adéquation : transformation digitale, budget adapté, région prioritaire"
-}
+ao._isRectification && 
+ao._changes?.isSubstantial === false
 ```
 
-**Logs** :
+**Action** :
+- Mise à jour DB : Deadline, `rectification_count++`, `rectification_date`
+- Retour : Conserve score original de l'AO (`_originalAO.finalScore`)
+- **Coût LLM** : 0€
+
+#### Branch 2.5 : Skip LLM
+
+**Condition** :
+```typescript
+ao._shouldSkipLLM === true
 ```
-✅ Analyse sémantique (boampSemanticAnalyzer): 150/644 AO
-```
+
+**Action** :
+- Score final basé uniquement sur keywords (avec pénalité 30%)
+- Formule : `finalScore = (keywordScore / 10) * 0.7` (max 7/10)
+- Priorité : MEDIUM si score ≥ 5.6, sinon LOW
+- **Coût LLM** : 0€
+
+#### Branch 3/4 : Analyse Complète (LLM)
+
+**Condition** : Tous les autres cas (nouveaux AO ou rectificatifs substantiels)
+
+**Workflow** : `analyzeAOCompleteWorkflow` qui enchaîne :
+1. `analyzeOneAOSemanticStep` → Appel agent IA
+2. `scoreOneAOStep` → Calcul score final
+
+**Coût LLM** : 1 appel par AO (~0.003€)
 
 ---
 
-### Step 6 : Feasibility Analysis (Agent IA)
+### Step 8 : analyzeOneAOSemanticStep ⭐
 
-**Fichier** : `feasibilityAnalysisStep`  
-**Agent** : `boampFeasibilityAnalyzer`
+**Rôle** : Analyse sémantique via agent IA `boampSemanticAnalyzer`.
 
-**Fonction** :
-- Analyse la **faisabilité** de répondre à l'AO
-- Évalue capacité financière, technique, timing
-- Identifie les blockers potentiels
-- Niveau de confiance : high | medium | low
+#### Schéma d'Entrée
 
-**Prompt IA** :
+```typescript
+z.object({
+  ao: aoSchema.extend({
+    keywordScore: z.number(),
+    matchedKeywords: z.array(z.string()),
+    keywordDetails: z.any().optional(),
+    ...
+  }),
+  client: clientSchema
+})
 ```
-Profil client:
-- CA annuel: 5 000 000€
-- Effectif: 50 personnes
-- Années d'expérience: 10
-- Références similaires: 25 projets
-- Budget minimum ciblé: 50 000€
-- Régions d'intervention: Île-de-France, Auvergne-Rhône-Alpes
 
-Appel d'offres:
-- Titre: Accompagnement transformation digitale
-- Budget: 75 000€
-- Deadline: 2025-01-15 (25 jours restants)
-- Région: Île-de-France
-- Procédure: Ouverte
-- Critères attribution: 60% technique, 40% prix
+#### Schéma de Sortie
 
-Question: Ce client peut-il répondre à cet AO ?
+```typescript
+z.object({
+  ao: aoSchema.extend({
+    semanticScore: z.number(),        // 0-10
+    semanticReason: z.string(),
+    semanticDetails: z.any().optional(),
+    procedureType: z.string().nullable(),
+    daysRemaining: z.number(),
+    ...
+  }),
+  client: clientSchema
+})
+```
 
-Évalue:
-1. Financial: Le budget est-il dans les capacités du client ?
-2. Technical: Le client a-t-il les compétences requises ?
-3. Timing: Le délai est-il suffisant pour préparer une réponse de qualité ?
+#### Intégration de l'Agent IA
 
-Réponds UNIQUEMENT en JSON:
-{
-  "financial": true,
-  "technical": true,
-  "timing": true,
-  "blockers": [],
-  "confidence": "high"
+**Appel de l'Agent** :
+
+```typescript
+// Dans analyzeOneAOSemanticStep
+const result = await analyzeSemanticRelevance(ao, keywordDetails);
+
+// Fonction analyzeSemanticRelevance (dans boamp-semantic-analyzer.ts)
+export async function analyzeSemanticRelevance(
+  ao: AOInput,
+  keywordScore?: KeywordScore
+): Promise<{
+  score: number;
+  reason: string;
+  details: BalthazarSemanticAnalysis | null;
+}> {
+  // Construction du prompt avec few-shot examples
+  const prompt = buildBalthazarSemanticPrompt(ao, keywordScore);
+  
+  // Appel agent avec structured output
+  const response = await boampSemanticAnalyzer.generate(prompt, {
+    structuredOutput: {
+      schema: balthazarSemanticAnalysisSchema,
+      errorStrategy: 'fallback',
+      fallbackValue: DEFAULT_FALLBACK_ANALYSIS
+    },
+  });
+  
+  const analysis = response.object as BalthazarSemanticAnalysis;
+  
+  return {
+    score: analysis.score_semantique_global,
+    reason: analysis.justification_globale,
+    details: analysis
+  };
 }
 ```
 
-**Seuil** : `isFeasible = financial && technical && timing`
+#### Construction du Prompt
 
-**Input** :
-```typescript
-{
-  relevant: AO[],
-  client: Client
-}
+Le prompt est construit avec :
+
+1. **Few-shot Examples** : 3 exemples réels Balthazar condensés :
+   - Ex1 : Tisséo (HAUTE_PRIORITE) - Plan stratégique + raison d'être
+   - Ex2 : ATMB (HAUTE_PRIORITE) - Entreprise à mission
+   - Ex3 : Formation Microsoft (NON_PERTINENT) - Red flag
+
+2. **Contexte Keywords** : 
+   - Score keywords (0-100)
+   - Secteurs détectés
+   - Expertises détectées
+   - Red flags
+
+3. **Données AO** : Titre, organisme, description, keywords
+
+**Exemple de Prompt** :
+
+```
+## EXEMPLES D'ANALYSE
+
+Ex1: "Prestation de conseil pour l'élaboration du plan stratégique..." → 9.7/10 (mobilite, strategie+raison_etre+gouvernance+transformation, CODIR) → HAUTE_PRIORITE
+Ex2: "Accompagnement vers le statut d'entreprise à mission" → 9.7/10 (entreprise_mission, raison_etre+entreprise_mission+gouvernance+rse+transformation, CODIR) → HAUTE_PRIORITE
+Ex3: "Formation Microsoft Office pour agents administratifs" → 0.5/10 (red flag formation) → NON_PERTINENT
+
+## AO À ANALYSER
+
+Titre: Accompagnement transformation digitale SNCF
+Organisme: SNCF
+Description: Mission de conseil en stratégie de transformation numérique...
+Keywords: conseil, stratégie, transformation, sncf
+Pré-scoring: 92/100
+Confidence: HIGH
+Secteurs: mobilite
+Expertises: strategie, transformation, gouvernance
+Red flags: aucun
+
+Analyse cet AO selon le format des exemples ci-dessus.
 ```
 
-**Output** :
+#### Structured Output
+
+L'agent retourne un schéma Zod structuré avec 3 axes :
+
 ```typescript
-{
-  feasible: AO[],  // AO faisables
-  client: Client
-}
+const balthazarSemanticAnalysisSchema = z.object({
+  // Axe 1 : Fit Sectoriel (35%)
+  fit_sectoriel: z.object({
+    score: z.number().min(0).max(10),
+    secteur_detecte: z.enum(['mobilite', 'assurance', 'energie', 'service_public', 'entreprise_mission', 'autre']),
+    justification: z.string()
+  }),
+  
+  // Axe 2 : Fit Expertise (35%)
+  fit_expertise: z.object({
+    score: z.number().min(0).max(10),
+    expertises_detectees: z.array(z.string()),
+    justification: z.string()
+  }),
+  
+  // Axe 3 : Fit Posture (20%)
+  fit_posture: z.object({
+    score: z.number().min(0).max(10),
+    niveau_intervention: z.enum(['CODIR', 'COMEX', 'direction', 'operationnel', 'inconnu']),
+    approche: z.array(z.string()),
+    justification: z.string()
+  }),
+  
+  // Score global (moyenne pondérée: 0.35×secteur + 0.35×expertise + 0.20×posture)
+  score_semantique_global: z.number().min(0).max(10),
+  
+  // Critères Balthazar (règle 3/4)
+  criteres_balthazar: z.object({
+    secteur_cible: z.boolean(),
+    besoin_transformation: z.boolean(),
+    ouverture_marche: z.boolean().optional(),
+    total_valides: z.number().min(0).max(4)
+  }),
+  
+  // Recommandation
+  recommandation: z.enum(['HAUTE_PRIORITE', 'MOYENNE_PRIORITE', 'BASSE_PRIORITE', 'NON_PERTINENT']),
+  justification_globale: z.string()
+});
 ```
 
-**AO Enrichi** :
-```typescript
+#### Gestion des Erreurs
+
+- **Structured Output Fallback** : Valeur par défaut si parsing échoue
+- **Fallback Fonctionnel** : Score basé sur keywords si erreur LLM (`(keywordScore / 100) * 0.7`)
+- **Logs** : Traçabilité complète pour debugging
+
+#### Exemple de Réponse Agent
+
+```json
 {
-  ...ao,
-  feasibility: {
-    financial: true,
-    technical: true,
-    timing: true,
-    blockers: [],
-    confidence: 'high'
+  "fit_sectoriel": {
+    "score": 10,
+    "secteur_detecte": "mobilite",
+    "justification": "SNCF = secteur mobilité prioritaire Balthazar"
   },
-  isFeasible: true
+  "fit_expertise": {
+    "score": 9,
+    "expertises_detectees": ["strategie", "transformation", "gouvernance"],
+    "justification": "Double expertise cœur Balthazar : plan stratégique + transformation"
+  },
+  "fit_posture": {
+    "score": 9,
+    "niveau_intervention": "CODIR",
+    "approche": ["ateliers", "intelligence_collective", "co-construction"],
+    "justification": "Niveau CODIR + approche participative typique Balthazar"
+  },
+  "score_semantique_global": 9.4,
+  "criteres_balthazar": {
+    "secteur_cible": true,
+    "besoin_transformation": true,
+    "ouverture_marche": true,
+    "total_valides": 3
+  },
+  "recommandation": "HAUTE_PRIORITE",
+  "justification_globale": "AO idéal pour Balthazar : secteur mobilité prioritaire, expertises signature, niveau CODIR, approche participative"
 }
-```
-
-**Logs** :
-```
-✅ Analyse faisabilité (boampFeasibilityAnalyzer): 120/150 AO
 ```
 
 ---
 
-### Step 7 : Scoring
+### Step 9 : scoreOneAOStep
 
-**Fichier** : `scoringStep`
+**Rôle** : Calcule le score final et détermine la priorité.
 
-**Fonction** :
-- Calcule un score final (0-100)
-- Détermine la priorité (HIGH, MEDIUM, LOW)
+#### Formule de Scoring
 
-**Formule** :
 ```typescript
-finalScore = (
-  keywordScore * 20 +      // 20 points max
-  semanticScore * 5 +      // 50 points max (score 0-10)
-  (isFeasible ? 30 : 0)    // 30 points bonus si faisable
+// Calcul score global (0-10)
+const keywordContribution = keywordDetails
+  ? (keywordDetails.score / 100) * 0.30  // Nouveau: 30% (0-100 → 0-10)
+  : (ao.keywordScore * 10) * 0.25;       // Ancien: 25% (backward compat)
+
+const score = (
+  ao.semanticScore * 0.50 +              // Pertinence: 50%
+  keywordContribution +                   // Keywords: 25-30%
+  (1 - Math.min(ao.daysRemaining / 60, 1)) * 10 * 0.20  // Urgence: 20%
 );
 
-priority = 
-  finalScore >= 80 ? 'HIGH' :
-  finalScore >= 60 ? 'MEDIUM' :
-  'LOW';
+// Priorisation
+const priority = 
+  score >= 8 ? 'HIGH' :
+  score >= 6 ? 'MEDIUM' : 'LOW';
 ```
 
-**Input** :
+#### Pondérations
+
+- **Pertinence sémantique** : 50% (analyse agent IA)
+- **Keywords** : 25-30% (pré-scoring gratuit)
+- **Urgence** : 20% (jours restants avant deadline, max 60 jours)
+
+#### Seuils de Priorité
+
+- **HIGH** : Score ≥ 8/10
+- **MEDIUM** : Score ≥ 6/10
+- **LOW** : Score < 6/10
+
+---
+
+### Step 10 : normalizeBranchResultsStep
+
+**Rôle** : Normalise les résultats des branches (le workflow branché retourne un objet avec clés de branches).
+
+#### Logique
+
 ```typescript
-{
-  feasible: AO[],
-  client: Client
-}
-```
-
-**Output** :
-```typescript
-{
-  scored: AO[],  // AO avec score final et priorité
-  client: Client
-}
-```
-
-**AO Enrichi** :
-```typescript
-{
-  ...ao,
-  finalScore: 83,
-  priority: 'HIGH'
-}
-```
-
-**Logs** :
-```
-✅ Scoring: 50 HIGH, 60 MEDIUM
+// Le workflow branché retourne :
+// { "handle-cancellation-ao": {...}, "analyze-ao-complete": {...} }
+// On extrait le résultat de la branche exécutée
 ```
 
 ---
 
-### Step 8 : Save Results
+### Step 11 : aggregateResultsStep
 
-**Fichier** : `saveResultsStep`
+**Rôle** : Agrège les résultats de tous les AO traités et calcule les statistiques.
 
-**Fonction** :
-- Sauvegarde les AO HIGH et MEDIUM dans Supabase
-- Gère l'historique des rectificatifs
-- Upsert sur `source_id` (évite les doublons)
+#### Schéma de Sortie
 
-**Input** :
 ```typescript
-{
-  scored: AO[],
-  client: Client
-}
+z.object({
+  all: z.array(z.any()),
+  high: z.array(z.any()),
+  medium: z.array(z.any()),
+  low: z.array(z.any()),
+  cancelled: z.array(z.any()),
+  stats: z.object({
+    total: z.number(),
+    analysed: z.number(),
+    cancelled: z.number(),
+    skipped: z.number().optional(),
+    high: z.number(),
+    medium: z.number(),
+    low: z.number(),
+    llmCalls: z.number()
+  }),
+  statsBySource: z.object({
+    BOAMP: z.object({ total, high, medium, low }),
+    MARCHESONLINE: z.object({ total, high, medium, low })
+  }),
+  highBySource: z.object({
+    BOAMP: z.array(z.any()),
+    MARCHESONLINE: z.array(z.any())
+  }),
+  mediumBySource: z.object({...}),
+  lowBySource: z.object({...})
+})
 ```
 
-**Output** :
-```typescript
-{
-  saved: number,   // Nombre d'AO sauvegardés
-  high: number,    // Nombre HIGH
-  medium: number,  // Nombre MEDIUM
-  low: number      // Nombre LOW
-}
-```
+#### Calcul des Statistiques
 
-**Champs Sauvegardés** :
+- **Total** : Nombre total d'AO traités
+- **Analysés** : Total - Annulés
+- **LLM Calls** : Nombre d'AO avec `semanticScore` défini (exclut skip LLM et annulés)
+- **Par Source** : Séparation BOAMP / MarchesOnline pour email
+
+---
+
+### Step 12 : saveResultsStep
+
+**Rôle** : Sauvegarde les AO analysés dans Supabase.
+
+#### Logique Métier
+
+1. **Upsert** : Utilise `onConflict: 'source_id'` pour éviter doublons
+2. **Gestion Rectificatifs** : Si rectificatif substantiel, met à jour l'AO existant avec historique dans `analysis_history`
+3. **Calcul Clés Déduplication** : Génère `uuid_procedure`, `dedup_key`, `siret_deadline_key` via `generateDedupKeys()`
+4. **Sauvegarde Tous les AO** : HIGH, MEDIUM, LOW (pas seulement HIGH+MEDIUM)
+
+#### Champs Sauvegardés
+
 ```typescript
 {
   // Identifiants
   source: 'BOAMP',
-  source_id: 'BOAMP-123',
+  source_id: '26-12345',
+  uuid_procedure: UUID,
+  siret: string | null,
+  dedup_key: string,
+  siret_deadline_key: string,
   
   // Contenu
-  title: '...',
-  description: '...',
-  keywords: [...],
+  title: string,
+  description: string,
+  keywords: string[],
   
   // Acheteur
-  acheteur: '...',
-  acheteur_email: '...',
+  acheteur: string,
+  acheteur_email: string | null,
   
   // Budget & Dates
-  budget_max: 75000,
-  deadline: '2025-01-15',
-  publication_date: '2025-12-20',
+  budget_max: number | null,
+  deadline: string,
+  publication_date: string,
   
   // Classification
   type_marche: 'SERVICES',
   region: 'Île-de-France',
   
-  // Analyse keywords
+  // Scores
   keyword_score: 0.65,
-  matched_keywords: [...],
-  
-  // Analyse sémantique
-  semantic_score: 8,
-  semantic_reason: '...',
-  
-  // Analyse faisabilité
-  feasibility: {...},
-  
-  // Scoring final
-  final_score: 83,
+  semantic_score: 9.4,
+  final_score: 8.5,
   priority: 'HIGH',
   
   // Métadonnées
   client_id: 'balthazar',
   status: 'analyzed',
-  analyzed_at: '2025-12-20T10:00:00Z',
+  analyzed_at: timestamp,
   
   // Rectificatifs
-  is_rectified: false,
-  rectification_count: 0,
+  is_rectified: boolean,
+  rectification_count: number,
+  analysis_history: JSONB,
+  rectification_changes: JSONB,
   
   // Backup
-  raw_json: {...}
+  raw_json: CanonicalAO
 }
 ```
 
-**Logs** :
+---
+
+### Step 13 : sendEmailStep
+
+**Rôle** : Envoie un email récapitulatif au client avec les AO pertinents.
+
+#### Fonctionnalités
+
+- Génère HTML et texte avec templates (`generateEmailHTML`, `generateEmailText`)
+- Liste les AO HIGH et MEDIUM par source
+- Liste les AO LOW avec raisons
+- Statistiques par source (BOAMP / MarchesOnline)
+- Gestion d'erreurs gracieuse (n'interrompt pas le workflow)
+
+---
+
+## 🤖 Intégration de l'Agent IA
+
+### Architecture de l'Intégration
+
+```mermaid
+sequenceDiagram
+    participant Workflow as semanticAnalysisStep
+    participant Function as analyzeSemanticRelevance
+    participant Agent as boampSemanticAnalyzer
+    participant LLM as GPT-4o-mini
+    participant Workflow2 as Workflow (suite)
+    
+    Workflow->>Function: analyzeSemanticRelevance(ao, keywordDetails)
+    Function->>Function: buildBalthazarSemanticPrompt()
+    Note over Function: Few-shot examples<br/>+ Contexte keywords<br/>+ Données AO
+    Function->>Agent: agent.generate(prompt, structuredOutput)
+    Agent->>LLM: Appel API OpenAI
+    Note over LLM: Analyse selon<br/>3 axes (sectoriel,<br/>expertise, posture)
+    LLM-->>Agent: Réponse JSON structurée
+    Agent->>Agent: Validation schéma Zod
+    Agent-->>Function: BalthazarSemanticAnalysis
+    Function->>Function: Extraction score + reason
+    Function-->>Workflow: { score: 9.4, reason: "...", details: {...} }
+    Workflow->>Workflow2: Continue avec semanticScore
 ```
-✅ Sauvegarde: 110 AO (50 HIGH, 60 MEDIUM, 0 LOW)
+
+### Flux de Données Agent → Workflow
+
+1. **Input** : AO avec `keywordScore` et `keywordDetails`
+2. **Prompt Building** : Construction avec few-shot + contexte keywords
+3. **Appel Agent** : `agent.generate()` avec structured output
+4. **Validation** : Schéma Zod garantit le format
+5. **Extraction** : Score 0-10 + justification
+6. **Enrichissement AO** : Ajout de `semanticScore` et `semanticReason`
+7. **Continuation** : Workflow continue avec AO enrichi
+
+### Gestion des Erreurs
+
+- **Structured Output Fallback** : Valeur par défaut si parsing échoue
+- **Fallback Fonctionnel** : Score basé sur keywords si erreur LLM
+- **Logs** : Traçabilité complète pour debugging
+
+---
+
+## 📊 Système de Scoring Multi-Niveaux
+
+### Pipeline Complet
+
+```mermaid
+graph LR
+    A[AO Brut] --> B[Keyword Matching<br/>Score 0-100<br/>Gratuit]
+    B --> C{Score ≥ 40?}
+    C -->|Oui| D[Semantic Analysis<br/>Agent IA<br/>Score 0-10<br/>~0.003€]
+    C -->|Non| E[Skip LLM<br/>Score keywords<br/>avec pénalité 30%]
+    D --> F[Scoring Final<br/>0-10<br/>50% sémantique<br/>25-30% keywords<br/>20% urgence]
+    E --> F
+    F --> G{Priorité}
+    G -->|≥8| H[HIGH]
+    G -->|≥6| I[MEDIUM]
+    G -->|<6| J[LOW]
+    
+    style D fill:#e1f5ff
+    style B fill:#fff4e1
+    style F fill:#e8f5e9
+```
+
+### Niveau 1 : Keyword Matching
+
+- **Fonction** : `calculateKeywordScore()` + `calculateEnhancedKeywordScore()`
+- **Lexique** : Secteurs (×3), Expertises (×2), Red flags
+- **Score** : 0-100
+- **Optimisation** : `shouldSkipLLM()` évite appels LLM inutiles
+
+### Niveau 2 : Semantic Analysis (Agent IA)
+
+- **Agent** : `boampSemanticAnalyzer`
+- **Modèle** : GPT-4o-mini
+- **Structured Output** : Schéma Zod avec 3 axes
+- **Score** : 0-10 (moyenne pondérée)
+- **Coût** : ~0.003€ par AO
+
+### Niveau 3 : Scoring Final
+
+- **Formule** :
+  ```typescript
+  score = (
+    semanticScore * 0.50 +      // 50%
+    keywordContribution * 0.30 + // 25-30%
+    urgency * 0.20              // 20%
+  );
+  ```
+- **Priorité** : HIGH (≥8), MEDIUM (≥6), LOW (<6)
+
+---
+
+## 🔗 Déduplication Cross-Platform
+
+### Principe
+
+Les AO peuvent apparaître sur **BOAMP** et **MarchesOnline**. Le système détecte et exclut les doublons avant l'analyse.
+
+### Stratégie de Matching (3 Niveaux)
+
+#### Niveau 1 : UUID Procédure (99% Fiabilité)
+
+```typescript
+// Matching direct via UUID universel
+const match = await supabase
+  .from('appels_offres')
+  .select('*')
+  .eq('uuid_procedure', marchesonlineAO.uuid_procedure)
+  .single();
+```
+
+**Taux de succès** : ~99% des cas
+
+#### Niveau 2 : Clé Composite (95% Fiabilité)
+
+```typescript
+// Matching via clé normalisée : title|deadline|acheteur
+const dedupKey = normalizeText(`${title}|${deadline}|${acheteur}`);
+const match = await supabase
+  .from('appels_offres')
+  .select('*')
+  .eq('dedup_key', dedupKey)
+  .single();
+```
+
+**Taux de succès** : ~95% des cas (fallback si UUID absent)
+
+#### Niveau 3 : SIRET + Deadline (80% Fiabilité)
+
+```typescript
+// Matching via SIRET + deadline
+const siretDeadlineKey = `${siret}|${deadline}`;
+const match = await supabase
+  .from('appels_offres')
+  .select('*')
+  .eq('siret_deadline_key', siretDeadlineKey)
+  .single();
+```
+
+**Taux de succès** : ~80% des cas (fallback ultime)
+
+### Fonction de Matching Batch
+
+```typescript
+// Dans fetchAndPrequalifyStep
+const matches = await findBatchBOAMPMatches(
+  marchesonlineData.records.map(ao => ({
+    uuid_procedure: ao.uuid_procedure,
+    title: ao.identity.title,
+    acheteur: ao.identity.acheteur,
+    deadline: ao.lifecycle.deadline,
+    siret: ao.metadata.siret
+  }))
+);
+
+// Filtrer : garder uniquement les AO MarchesOnline SANS match BOAMP
+const uniqueMarchesonlineAOs = marchesonlineData.records.filter((ao, index) => {
+  const match = matches.get(index);
+  return !match; // Exclure si match trouvé
+});
 ```
 
 ---
 
-## 🤖 Agents IA
+## 📝 Gestion des Rectificatifs
 
-### Agent 1 : boampSemanticAnalyzer
+### Algorithme de Détection
 
-**Fichier** : `src/mastra/agents/boamp-semantic-analyzer.ts`
+1. **Détection** : `isRectification(ao)` vérifie 3 critères
+2. **Recherche Original** : `findOriginalAO()` avec 3 stratégies
+3. **Comparaison** : `detectSubstantialChanges()` analyse 7 types de changements
+4. **Décision** : Substantiel → Re-analyse, Mineur → MAJ DB
 
-**Rôle** : Analyser la pertinence métier
+### Types de Changements Détectés
 
-**Modèle** : OpenAI GPT-4
+| Type | Seuil | Détection |
+|------|-------|-----------|
+| Budget | Variation > 20% | Calcul pourcentage |
+| Deadline | Décalage > 7 jours | Calcul jours |
+| Critères financiers | Modification | Comparaison JSON `CAP_ECO` |
+| Critères techniques | Modification | Comparaison JSON `CAP_TECH` |
+| Type de marché | Changement | Comparaison string |
+| Région | Changement | Comparaison string |
+| Titre | Similarité < 80% | Distance Levenshtein |
 
-**Prompt Système** :
-```
-Tu es un expert en analyse d'appels d'offres publics français.
-Ta mission : évaluer la pertinence d'un AO pour un cabinet de conseil.
+### Exemple de Changement Substantiel
 
-Critères d'évaluation:
-- Adéquation secteur et expertise
-- Compatibilité budget
-- Localisation géographique
-- Type de procédure
-- Signaux métier détectés
-
-Réponds toujours en JSON avec score (0-10) et raison.
-```
-
----
-
-### Agent 2 : boampFeasibilityAnalyzer
-
-**Fichier** : `src/mastra/agents/boamp-feasibility-analyzer.ts`
-
-**Rôle** : Analyser la faisabilité
-
-**Modèle** : OpenAI GPT-4
-
-**Prompt Système** :
-```
-Tu es un expert en évaluation de capacité à répondre aux appels d'offres.
-Ta mission : déterminer si un cabinet peut répondre à un AO.
-
-Critères d'évaluation:
-- Financial: Budget dans les capacités ?
-- Technical: Compétences requises disponibles ?
-- Timing: Délai suffisant pour réponse de qualité ?
-
-Identifie les blockers potentiels.
-Réponds toujours en JSON structuré.
+```typescript
+{
+  isSubstantial: true,
+  changes: [
+    {
+      field: 'budget',
+      old: 50000,
+      new: 75000,
+      change_pct: 50
+    },
+    {
+      field: 'deadline',
+      old: '2025-01-15',
+      new: '2025-02-01',
+      days_added: 17
+    }
+  ]
+}
 ```
 
 ---
 
-## 📊 Métriques et Résultats
+## 📈 Métriques et Résultats
 
 ### Taux de Conversion Typiques
 
@@ -581,13 +1193,15 @@ Réponds toujours en JSON structuré.
   ↓
 644 AO à analyser (1 rectif substantiel)
   ↓
-644 AO avec pré-score (tous passent)
+320 AO nouveaux (324 déjà analysés - skip)
   ↓
-150 AO pertinents (23% - score ≥ 6)
+320 AO avec pré-score keywords
   ↓
-120 AO faisables (18% - feasibility OK)
+280 AO pertinents (40 skip LLM - score < 40)
   ↓
-110 AO sauvegardés (17% - HIGH + MEDIUM)
+280 AO analysés par agent IA
+  ↓
+110 AO sauvegardés (HIGH + MEDIUM)
   ↓
 50 HIGH (8%), 60 MEDIUM (9%)
 ```
@@ -599,12 +1213,19 @@ Réponds toujours en JSON structuré.
 | Fetch | 5-10s | 0€ |
 | Cancellations | < 1s | 0€ |
 | Rectifications | 1-2s | 0€ |
+| Filter Already Analyzed | 1-2s | 0€ |
 | Keywords | 1-2s | 0€ |
-| Semantic (150 AO) | 30-60s | ~0.50€ |
-| Feasibility (120 AO) | 30-60s | ~0.40€ |
+| Semantic (280 AO) | 60-90s | ~0.84€ |
 | Scoring | < 1s | 0€ |
 | Save | 2-5s | 0€ |
+| Email | 1-2s | 0€ |
 | **TOTAL** | **~2-3 min** | **~1€/jour** |
+
+### Coûts LLM Optimisés
+
+- **Skip LLM** : ~40 AO/jour évités (score < 40) → Économie ~0.12€
+- **Déjà analysés** : ~324 AO/jour évités → Économie ~1€
+- **Total économisé** : ~1.12€/jour grâce aux optimisations
 
 ---
 
@@ -612,11 +1233,13 @@ Réponds toujours en JSON structuré.
 
 | Propriété | Garantie |
 |-----------|----------|
-| **Exhaustivité** | ✅ 100% des AO analysés |
-| **Zéro faux négatif** | ✅ Tous les AO passent le pré-scoring |
-| **Analyse IA** | ✅ Évaluation contextuelle (pas binaire) |
+| **Exhaustivité** | ✅ 100% des AO analysés (sauf skip LLM justifié) |
+| **Zéro faux négatif** | ✅ Tous les AO passent le pré-scoring keywords |
+| **Analyse IA** | ✅ Évaluation contextuelle avec structured output |
 | **Coût optimisé** | ✅ ~1€/jour (pré-filtrage intelligent) |
 | **Traçabilité** | ✅ Logs complets + historique DB |
+| **Typage** | ✅ Schémas Zod garantissent la structure |
+| **Résilience** | ✅ Fallback gracieux en cas d'erreur LLM |
 
 ---
 
@@ -625,7 +1248,7 @@ Réponds toujours en JSON structuré.
 ### Mastra Studio
 
 ```
-http://localhost:3000
+http://localhost:4111
 → Workflows → aoVeilleWorkflow
 → Execute
 ```
@@ -641,7 +1264,6 @@ if (!workflow) {
   throw new Error('Workflow aoVeilleWorkflow not found');
 }
 
-// Utiliser l'API Mastra : createRunAsync() + start()
 const run = await workflow.createRunAsync();
 const result = await run.start({
   inputData: {
@@ -652,9 +1274,37 @@ const result = await run.start({
 
 console.log(`${result.saved} AO analysés`);
 console.log(`${result.high} HIGH, ${result.medium} MEDIUM`);
+console.log(`${result.llmCalls} appels LLM effectués`);
 ```
 
 ---
 
-**Workflow production-grade avec analyse IA contextuelle.** 🚀
+## 🔧 Configuration Avancée
 
+### Concurrence du `.foreach()`
+
+```typescript
+.foreach(processOneAOWorkflow, { concurrency: 10 })
+```
+
+- **Parallélisme** : 10 AO traités simultanément
+- **Rate Limiting** : Contrôle le nombre d'appels LLM simultanés
+- **Optimisation** : Équilibre vitesse / limites API OpenAI
+
+### Override MarchesOnline RSS
+
+```typescript
+const result = await run.start({
+  inputData: {
+    clientId: 'balthazar',
+    marchesonlineRSSUrls: [
+      'https://www.marchesonline.com/rss/...',
+      'https://www.marchesonline.com/rss/...'
+    ]
+  }
+});
+```
+
+---
+
+**Workflow production-grade avec architecture agentique Mastra, intégration IA structurée et optimisations coûts.** 🚀
