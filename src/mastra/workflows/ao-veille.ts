@@ -129,7 +129,8 @@ const fetchAndPrequalifyStep = createStep({
   id: 'fetch-and-prequalify',
   inputSchema: z.object({
     clientId: z.string(),
-    since: z.string().optional()
+    since: z.string().optional(),
+    marchesonlineRSSUrls: z.array(z.string().url()).optional() // 🆕 Override optionnel pour MarchesOnline RSS
   }),
   outputSchema: z.object({
     prequalified: z.array(aoSchema),
@@ -239,14 +240,19 @@ const fetchAndPrequalifyStep = createStep({
     
     // 3️⃣ Fetch MarchesOnline RSS (si configuré)
     let marchesonlineData = null;
-    if (client.preferences.marchesonlineRSSUrls && 
-        Array.isArray(client.preferences.marchesonlineRSSUrls) && 
-        client.preferences.marchesonlineRSSUrls.length > 0) {
-      
-      console.log(`📡 Fetching MarchesOnline RSS (${client.preferences.marchesonlineRSSUrls.length} flux)...`);
+    // 🆕 Priorité : paramètre input > config client
+    const rssUrls = inputData.marchesonlineRSSUrls || client.preferences.marchesonlineRSSUrls;
+    
+    if (rssUrls && Array.isArray(rssUrls) && rssUrls.length > 0) {
+      console.log(`📡 Fetching MarchesOnline RSS (${rssUrls.length} flux)...`);
+      if (inputData.marchesonlineRSSUrls) {
+        console.log(`   📋 Source: paramètre input (override)`);
+      } else {
+        console.log(`   📋 Source: config client`);
+      }
       
       marchesonlineData = await marchesonlineRSSFetcherTool.execute!({
-        rssUrls: client.preferences.marchesonlineRSSUrls,
+        rssUrls: rssUrls,
         since: inputData.since,
         typeMarche: client.preferences.typeMarche
       }, {
@@ -1729,7 +1735,8 @@ export const aoVeilleWorkflow = createWorkflow({
   id: 'aoVeilleWorkflow',
   inputSchema: z.object({
     clientId: z.string(),
-    since: z.string().optional()
+    since: z.string().optional(),
+    marchesonlineRSSUrls: z.array(z.string().url()).optional() // 🆕 Override optionnel pour MarchesOnline RSS
   }),
   outputSchema: z.object({
     saved: z.number(),

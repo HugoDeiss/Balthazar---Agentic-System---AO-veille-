@@ -358,8 +358,8 @@ export const marchesonlineRSSFetcherTool = createTool({
             ? new Date(item.pubDate).toISOString().split('T')[0]
             : null;
           
-          // Filtrer par date si spécifiée
-          if (since && pubDate !== targetDate) {
+          // Filtrer par date (toujours, targetDate est toujours calculé - veille si since non fourni)
+          if (pubDate && pubDate !== targetDate) {
             continue;
           }
           

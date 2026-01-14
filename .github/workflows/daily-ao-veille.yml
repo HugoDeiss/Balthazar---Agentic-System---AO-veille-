@@ -31,6 +31,21 @@ jobs:
             echo "since=$(date -d '1 day ago' '+%Y-%m-%d')" >> $GITHUB_OUTPUT
           fi
       
+      - name: 📡 Déterminer activation MarchesOnline
+        id: marchesonline
+        run: |
+          DAY_OF_WEEK=$(date +%u)  # 1=lundi, 3=mercredi, 5=vendredi, 7=dimanche
+          
+          if [ "$DAY_OF_WEEK" -eq 3 ] || [ "$DAY_OF_WEEK" -eq 5 ]; then
+            echo "📡 MarchesOnline activé (mercredi ou vendredi)"
+            echo 'urls=["https://www.marchesonline.com/mol/rss/appels-d-offres-domaine-activite-services.xml"]' >> $GITHUB_OUTPUT
+            echo "enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "📡 MarchesOnline désactivé"
+            echo 'urls=[]' >> $GITHUB_OUTPUT
+            echo "enabled=false" >> $GITHUB_OUTPUT
+          fi
+      
       - name: 🚀 Déclencher le workflow AO Veille
         id: trigger
         run: |
@@ -41,13 +56,15 @@ jobs:
           
           echo "🔍 Lancement de la veille pour le client: $CLIENT_ID"
           echo "📅 Depuis: ${{ steps.date.outputs.since }}"
+          echo "📡 MarchesOnline: ${{ steps.marchesonline.outputs.enabled }}"
           
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
             -H "Content-Type: application/json" \
             -d "{
               \"inputData\": {
                 \"clientId\": \"$CLIENT_ID\",
-                \"since\": \"${{ steps.date.outputs.since }}\"
+                \"since\": \"${{ steps.date.outputs.since }}\",
+                \"marchesonlineRSSUrls\": ${{ steps.marchesonline.outputs.urls }}
               }
             }" \
             ${{ secrets.MASTRA_CLOUD_URL }}/api/workflows/ao-veille-workflow/run)
