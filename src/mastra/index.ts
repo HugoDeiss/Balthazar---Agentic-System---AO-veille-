@@ -35,6 +35,9 @@ export const mastra = new Mastra({
   workflows: {
     aoVeilleWorkflow,
   },
+  bundler: {
+    externals: ["xmlbuilder"],
+  },
   server: {
     port: 4111,
     cors: {
