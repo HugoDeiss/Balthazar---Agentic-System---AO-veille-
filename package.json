@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "mastra dev",
-    "build": "mastra build",
+    "build": "mastra build --dir src/mastra",
     "start": "node .mastra/output/index.mjs"
   },
   "dependencies": {
