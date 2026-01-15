@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "mastra dev",
-    "build": "mastra build --dir src/mastra",
+    "build": "npx mastra build --dir src/mastra",
     "start": "node .mastra/output/index.mjs"
   },
   "dependencies": {
