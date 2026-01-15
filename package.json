@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "latest",
-    "@mastra/core": "1.0.0-beta.21",
+    "@mastra/core": "0.24.9",
     "@supabase/supabase-js": "^2.89.0",
     "resend": "^6.7.0",
     "rss-parser": "^3.13.0",
@@ -20,7 +20,7 @@
   "devDependencies": {
     "@types/node": "^22.15.30",
     "dotenv": "^16.4.5",
-    "mastra": "1.0.0-beta.14",
+    "mastra": "0.18.9",
     "ts-node": "^10.9.2",
     "tsx": "^4.19.2",
     "typescript": "^5.8.3"
