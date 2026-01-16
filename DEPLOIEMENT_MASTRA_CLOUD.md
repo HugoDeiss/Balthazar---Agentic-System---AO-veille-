@@ -66,7 +66,7 @@ project-root/
 
 ### ✅ Script de Build
 
-**CRITIQUE :** Le script `build` doit utiliser `npx` car `mastra` est dans `devDependencies` :
+**IMPORTANT :** Le script `build` peut utiliser `mastra` directement ou `npx mastra` :
 
 ```json
 {
@@ -76,19 +76,16 @@ project-root/
 }
 ```
 
-**Pourquoi `npx` ?**
-- Mastra Cloud exécute `npm ci --omit=dev` (installe uniquement les `dependencies`)
-- `mastra` est dans `devDependencies`, donc non installé en production
-- `npx` télécharge temporairement `mastra` pour l'exécuter
+**Configuration recommandée :**
+- `mastra` doit être dans `dependencies` (pas `devDependencies`) pour éviter le warning "mastra will be installed"
+- Avec `mastra` en `dependencies`, vous pouvez utiliser :
+  - `"build": "mastra build --dir src/mastra"` ✅ (direct)
+  - `"build": "npx mastra build --dir src/mastra"` ✅ (via npx, fonctionne aussi)
 
-**❌ Ne PAS utiliser :**
-```json
-{
-  "scripts": {
-    "build": "mastra build --dir src/mastra"  // ❌ Échouera : commande non trouvée
-  }
-}
-```
+**Pourquoi mettre `mastra` en `dependencies` ?**
+- Mastra Cloud exécute `npm ci --omit=dev` (installe uniquement les `dependencies`)
+- Si `mastra` est en `devDependencies`, `npx` le télécharge temporairement (warning)
+- En `dependencies`, `mastra` est installé directement, plus propre et plus rapide
 
 ### ✅ Externals (Bundler)
 
@@ -312,6 +309,31 @@ git add package.json package-lock.json
 git commit -m "chore: synchroniser package-lock.json"
 git push origin main
 ```
+
+---
+
+### ⚠️ Warnings Peer Dependency (Non bloquants)
+
+**Symptôme :**
+```
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: @openrouter/ai-sdk-provider@1.2.3
+npm warn Found: ai@4.3.19
+npm warn Could not resolve dependency:
+npm warn peer ai@"^5.0.0" from @openrouter/ai-sdk-provider-v5@1.2.3
+npm warn Conflicting peer dependency: ai@5.0.121
+```
+
+**Cause :**
+Incompatibilité de peer dependency entre `@mastra/core@0.24.9` (utilise `ai@^4.3.19`) et `@openrouter/ai-sdk-provider` (demande `ai@^5.0.0`). Problème interne à Mastra, pas dans votre code.
+
+**Impact :**
+- ✅ **Non bloquant** : Le build et le runtime fonctionnent correctement
+- ⚠️ **Surveillance recommandée** : Surveiller les logs runtime pour d'éventuelles erreurs liées à OpenRouter
+- 📝 **Action** : Documenter si des erreurs apparaissent en production
+
+**Solution :**
+Aucune action requise pour l'instant. Ces warnings sont attendus avec `@mastra/core@0.24.9` et n'affectent pas le fonctionnement du système.
 
 ---
 
