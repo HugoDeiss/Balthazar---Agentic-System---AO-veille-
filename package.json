@@ -9,12 +9,14 @@
     "start": "node .mastra/output/index.mjs"
   },
   "dependencies": {
-    "@ai-sdk/openai": "latest",
+    "@ai-sdk/openai": "2.0.53",
     "@mastra/core": "0.24.9",
+    "@mastra/libsql": "0.16.4",
+    "@mastra/loggers": "0.10.19",
     "@supabase/supabase-js": "^2.89.0",
     "resend": "^6.7.0",
     "rss-parser": "^3.13.0",
-    "xmlbuilder": "^11.0.1",
+    "xmlbuilder": "11.0.1",
     "zod": "^3.25.67"
   },
   "devDependencies": {

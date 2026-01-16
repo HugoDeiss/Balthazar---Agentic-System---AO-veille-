@@ -255,8 +255,20 @@ Bug dans le bundler du déployer Mastra Cloud (version 0.24.9). Problème intern
 - ⏳ Attendre le correctif de leur côté
 - ✅ Le build local fonctionne, seul le déploiement Cloud est bloqué
 
-**Workaround Temporaire :**
-Aucun workaround connu. Le problème est dans le bundler Mastra Cloud lui-même.
+**Workaround officiel (Mastra team, issue #11982) :**
+
+Mastra Cloud peut échouer au bundling avec une erreur de circular re-export (`HttpTransport`).
+
+**Fix temporaire :**
+```bash
+npm install @mastra/libsql@0.16.4 @mastra/loggers@0.10.19
+```
+
+**Note sur les versions :** Les versions exactes installées peuvent différer de `@mastra/core`. Dans ce projet, `@mastra/core@0.24.9` est utilisé avec `@mastra/libsql@0.16.4` et `@mastra/loggers@0.10.19`.
+
+**Important :** Ces packages doivent être dans `dependencies` (pas `devDependencies`) car le build Cloud utilise `npm ci --omit=dev`.
+
+**Note :** Ce workaround a été confirmé par l'équipe Mastra sur Discord (référence issue GitHub #11982).
 
 ---
 
