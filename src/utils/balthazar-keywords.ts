@@ -160,6 +160,25 @@ export const balthazarLexicon = {
         /objectifs\s+strat(é|e)giques/i
       ]
     },
+    // Prestation de conseil / consulting (nature de la mission demandée)
+    conseil: {
+      weight: 2,
+      keywords: [
+        "conseil", "consulting",
+        "prestation de conseil", "prestation conseil",
+        "mission de conseil", "mission conseil",
+        "cabinet de conseil", "conseil en stratégie",
+        "conseil en strategie", "conseil en transformation",
+        "accompagnement en conseil"
+      ],
+      patterns: [
+        /prestation\s+(de\s+)?conseil/i,
+        /mission\s+(de\s+)?conseil/i,
+        /cabinet\s+de\s+conseil/i,
+        /conseil\s+en\s+(strat(é|e)gie|transformation)/i,
+        /\bconsulting\b/i
+      ]
+    },
     transformation: {
       weight: 2,
       keywords: [
