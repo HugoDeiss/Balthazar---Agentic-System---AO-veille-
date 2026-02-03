@@ -67,7 +67,7 @@ jobs:
                 \"marchesonlineRSSUrls\": ${{ steps.marchesonline.outputs.urls }}
               }
             }" \
-            ${{ secrets.MASTRA_CLOUD_URL }}/api/workflows/aoVeilleWorkflow/create-run)
+            ${{ secrets.MASTRA_CLOUD_URL }}/api/workflows/aoVeilleWorkflow/start-async)
           
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | sed '$d')
