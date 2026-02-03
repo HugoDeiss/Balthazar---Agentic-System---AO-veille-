@@ -395,17 +395,18 @@ z.object({
    - Analyse titre, description, keywords, acheteur
    - Lexique Balthazar avec pondérations :
      - Secteurs cibles : ×3 (mobilités, entreprises à mission, assurance, énergie, service public)
-     - Expertises : ×2 (stratégie, transformation, gouvernance, RSE, etc.)
-     - Red flags : Score 0 (formation catalogue, travaux, IT, fournitures, juridique pur, actuariat)
+     - Expertises : ×2 (conseil, stratégie, transformation, gouvernance, RSE, raison d'être, etc.)
+     - Red flags : pénalité -30 pts (formation catalogue, travaux, IT, fournitures, juridique pur, actuariat)
 
 2. **Scoring Amélioré** : Utilise `calculateEnhancedKeywordScore()` :
    - Bonus/malus métier
    - Détection signaux faibles (strategy, transformation, innovation, etc.)
 
-3. **Décision Skip LLM** : Utilise `shouldSkipLLM()` :
-   - Score < 20 → Skip LLM (red flag détecté)
-   - Score < 40 → Skip LLM (faible pertinence)
-   - Score ≥ 40 → Analyse LLM requise
+3. **Décision Skip LLM** : Utilise `shouldSkipLLM()` (voir `EXPLICATION_SYSTEME_SCORING.md` pour le détail) :
+   - Score < 20 → Skip LLM
+   - Score 20-30 → Analyse LLM seulement si confiance HIGH, sinon Skip
+   - Score 30-40 avec confiance LOW → Skip LLM (économie)
+   - Score ≥ 30 (avec confiance MEDIUM/HIGH) → Analyse LLM requise
 
 4. **Tri** : Trie par score décroissant (meilleurs AO en premier)
 

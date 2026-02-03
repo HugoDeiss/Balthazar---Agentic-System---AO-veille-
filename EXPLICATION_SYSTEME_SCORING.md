@@ -30,7 +30,7 @@ Le système analyse le **titre, la description, les mots-clés et l'acheteur** d
 
 ### Structure du Lexique
 
-Le lexique est organisé en **3 grandes catégories** avec des pondérations différentes :
+Le lexique est organisé en **3 catégories qui attribuent des points** (secteurs, expertises, posture) et une **4e dimension « red flags »** qui ne donne pas de points mais signale les prestations hors périmètre (voir Malus ci-dessous). Les pondérations s’appliquent aux 3 premières catégories :
 
 #### 1. SECTEURS CIBLES (Pondération ×3)
 
@@ -48,6 +48,7 @@ Le lexique est organisé en **3 grandes catégories** avec des pondérations dif
 #### 2. EXPERTISES MÉTIER (Pondération ×2)
 
 **Expertises détectées :**
+- **Conseil** (prestation de conseil, consulting, mission de conseil, cabinet de conseil)
 - Stratégie (plan stratégique, diagnostic, vision)
 - Transformation (conduite du changement, modernisation)
 - Raison d'être / Entreprise à mission
@@ -433,7 +434,7 @@ score_final = 7.65/10
 
 ### Cas Spécial : Skip LLM
 
-Si l'analyse IA est skippée (score keywords < 40), le score final est calculé différemment :
+Si l'analyse IA est skippée (selon les règles de décision de la Partie 1 : score, confiance, red flags), le score final est calculé différemment :
 
 ```
 score_final_skip = (score_keywords / 10) × 0.7
@@ -637,6 +638,6 @@ Le système de scoring combine :
 
 ---
 
-**Document créé le :** 2025-01-XX  
-**Version :** 1.0  
+**Document mis à jour :** 2025-02  
+**Version :** 1.1  
 **Auteur :** Système Balthazar - Agentic System
