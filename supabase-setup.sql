@@ -214,12 +214,15 @@ WHERE siret_deadline_key IS NOT NULL;
 -- ============================================
 
 CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public, pg_temp
+AS $$
 BEGIN
   NEW.updated_at = NOW();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 -- Trigger sur la table clients
 DROP TRIGGER IF EXISTS update_clients_updated_at ON clients;
@@ -227,6 +230,93 @@ CREATE TRIGGER update_clients_updated_at
   BEFORE UPDATE ON clients
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================
+-- 4b. FONCTION EXTRACT_BOAMP_ID (utilitaire)
+-- ============================================
+-- Extrait l'ID BOAMP depuis raw_json (idweb, boamp_id ou id)
+CREATE OR REPLACE FUNCTION public.extract_boamp_id(raw_json jsonb)
+RETURNS text
+LANGUAGE plpgsql
+IMMUTABLE
+SET search_path = pg_catalog, public, pg_temp
+AS $function$
+BEGIN
+  RETURN COALESCE(
+    raw_json->>'idweb',
+    raw_json->>'boamp_id',
+    raw_json->>'id'
+  );
+END;
+$function$;
+
+-- ============================================
+-- 4c. ROW LEVEL SECURITY (RLS)
+-- ============================================
+-- 1 policy per action + (select auth.*) pour initplan (perf)
+ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.appels_offres ENABLE ROW LEVEL SECURITY;
+
+-- clients (drop anciennes + nouvelles pour idempotence)
+DROP POLICY IF EXISTS "Service role has full access to clients" ON public.clients;
+DROP POLICY IF EXISTS "Authenticated can read clients" ON public.clients;
+DROP POLICY IF EXISTS "clients_select" ON public.clients;
+DROP POLICY IF EXISTS "clients_insert" ON public.clients;
+DROP POLICY IF EXISTS "clients_update" ON public.clients;
+DROP POLICY IF EXISTS "clients_delete" ON public.clients;
+CREATE POLICY "clients_select" ON public.clients FOR SELECT
+  USING (((select auth.jwt()) ->> 'role') = 'service_role' OR (select auth.role()) = 'authenticated');
+CREATE POLICY "clients_insert" ON public.clients FOR INSERT
+  WITH CHECK (((select auth.jwt()) ->> 'role') = 'service_role');
+CREATE POLICY "clients_update" ON public.clients FOR UPDATE
+  USING (((select auth.jwt()) ->> 'role') = 'service_role')
+  WITH CHECK (((select auth.jwt()) ->> 'role') = 'service_role');
+CREATE POLICY "clients_delete" ON public.clients FOR DELETE
+  USING (((select auth.jwt()) ->> 'role') = 'service_role');
+
+-- appels_offres (drop anciennes + nouvelles pour idempotence)
+DROP POLICY IF EXISTS "Service role has full access to appels_offres" ON public.appels_offres;
+DROP POLICY IF EXISTS "Authenticated can read appels_offres" ON public.appels_offres;
+DROP POLICY IF EXISTS "appels_offres_select" ON public.appels_offres;
+DROP POLICY IF EXISTS "appels_offres_insert" ON public.appels_offres;
+DROP POLICY IF EXISTS "appels_offres_update" ON public.appels_offres;
+DROP POLICY IF EXISTS "appels_offres_delete" ON public.appels_offres;
+CREATE POLICY "appels_offres_select" ON public.appels_offres FOR SELECT
+  USING (((select auth.jwt()) ->> 'role') = 'service_role' OR (select auth.role()) = 'authenticated');
+CREATE POLICY "appels_offres_insert" ON public.appels_offres FOR INSERT
+  WITH CHECK (((select auth.jwt()) ->> 'role') = 'service_role');
+CREATE POLICY "appels_offres_update" ON public.appels_offres FOR UPDATE
+  USING (((select auth.jwt()) ->> 'role') = 'service_role')
+  WITH CHECK (((select auth.jwt()) ->> 'role') = 'service_role');
+CREATE POLICY "appels_offres_delete" ON public.appels_offres FOR DELETE
+  USING (((select auth.jwt()) ->> 'role') = 'service_role');
+
+-- ============================================
+-- 4d. VUE RECTIFICATIFS_AVEC_ORIGINAL
+-- ============================================
+-- Vue rectificatifs + AO original (security_invoker = pas de privilege escalation)
+DROP VIEW IF EXISTS public.rectificatifs_avec_original;
+CREATE VIEW public.rectificatifs_avec_original
+WITH (security_invoker = true)
+AS
+SELECT
+  r.id AS rectificatif_id,
+  r.source_id AS rectificatif_source_id,
+  r.title AS rectificatif_title,
+  r.rectification_date,
+  r.rectification_changes,
+  o.id AS original_id,
+  o.source_id AS original_source_id,
+  o.title AS original_title,
+  o.semantic_score AS original_semantic_score,
+  o.priority AS original_priority,
+  r.semantic_score AS new_semantic_score,
+  r.priority AS new_priority,
+  (r.semantic_score - o.semantic_score) AS score_improvement
+FROM public.appels_offres r
+LEFT JOIN public.appels_offres o ON o.boamp_id = (r.raw_json ->> 'annonce_lie')
+WHERE r.is_rectified = true AND r.rectification_date IS NOT NULL
+ORDER BY r.rectification_date DESC;
 
 -- ============================================
 -- 5. INSÉRER LE CLIENT BALTHAZAR (EXEMPLE)
