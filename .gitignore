@@ -30,3 +30,6 @@ Thumbs.db
 # Retry queue (runtime data)
 .retry-queue.json
 
+# Workflow output
+resultat-workflow.json
+
