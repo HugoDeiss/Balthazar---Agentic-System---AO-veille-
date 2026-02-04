@@ -5,7 +5,8 @@
  */
 
 export interface EmailData {
-  date: string; // Date of the report (today's date - when email is sent)
+  date: string; // Date ou plage pour l'affichage (YYYY-MM-DD ou since_until pour plage)
+  dateRange?: { since: string; until: string }; // Plage optionnelle (since→until)
   statsBySource: {
     BOAMP: { total: number; high: number; medium: number; low: number };
     MARCHESONLINE: { total: number; high: number; medium: number; low: number };
@@ -49,7 +50,7 @@ function formatDate(dateStr: string): string {
  */
 function formatDateWithDay(dateStr: string): string {
   try {
-    const date = new Date(dateStr);
+    const date = new Date(dateStr + 'T12:00:00Z'); // Éviter décalage timezone
     const dayName = date.toLocaleDateString('fr-FR', { weekday: 'long' });
     const dateFormatted = formatDate(dateStr);
     return `${dayName} ${dateFormatted}`;
@@ -59,10 +60,17 @@ function formatDateWithDay(dateStr: string): string {
 }
 
 /**
+ * Format a date range for display (ex: "21/01/2026 au 03/02/2026")
+ */
+function formatDateRange(since: string, until: string): string {
+  return `${formatDate(since)} au ${formatDate(until)}`;
+}
+
+/**
  * Generate HTML email content from structured data
  */
 export function generateEmailHTML(data: EmailData): string {
-  const dateFormatted = formatDateWithDay(data.date);
+  const dateFormatted = getDateFormatted(data);
   const totalAnalyzed = data.statsBySource.BOAMP.total + data.statsBySource.MARCHESONLINE.total;
   const totalRelevant = data.relevantAOs.length;
   const totalLow = data.lowPriorityAOs.length;
@@ -239,10 +247,28 @@ export function generateEmailHTML(data: EmailData): string {
 }
 
 /**
+ * Get formatted date string for display (single day or range)
+ */
+function getDateFormatted(data: EmailData): string {
+  return data.dateRange
+    ? formatDateRange(data.dateRange.since, data.dateRange.until)
+    : formatDateWithDay(data.date);
+}
+
+/**
+ * Get short date for subject (DD/MM/YYYY or range)
+ */
+function getDateShort(data: EmailData): string {
+  return data.dateRange
+    ? formatDateRange(data.dateRange.since, data.dateRange.until)
+    : formatDate(data.date);
+}
+
+/**
  * Generate plain text version of email (simple extraction)
  */
 export function generateEmailText(data: EmailData): string {
-  const dateFormatted = formatDateWithDay(data.date);
+  const dateFormatted = getDateFormatted(data);
   const totalAnalyzed = data.statsBySource.BOAMP.total + data.statsBySource.MARCHESONLINE.total;
   const totalRelevant = data.relevantAOs.length;
   const totalLow = data.lowPriorityAOs.length;
@@ -331,7 +357,7 @@ export function generateEmailText(data: EmailData): string {
  * Generate email subject line
  */
 export function generateEmailSubject(data: EmailData): string {
-  const dateFormatted = formatDate(data.date);
+  const dateFormatted = getDateShort(data);
   const totalAnalyzed = data.statsBySource.BOAMP.total + data.statsBySource.MARCHESONLINE.total;
   const totalRelevant = data.relevantAOs.length;
 

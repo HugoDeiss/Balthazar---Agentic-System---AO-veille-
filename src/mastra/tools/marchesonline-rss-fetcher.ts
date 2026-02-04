@@ -332,7 +332,11 @@ export const marchesonlineRSSFetcherTool = createTool({
       .describe('Liste des URLs des flux RSS MarchesOnline à récupérer'),
     since: z.string()
       .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .describe('Date au format YYYY-MM-DD (ex: 2025-12-17)')
+      .describe('Date au format YYYY-MM-DD (début de période)')
+      .optional(),
+    until: z.string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .describe('Date au format YYYY-MM-DD (fin de période, optionnel)')
       .optional(),
     typeMarche: z.enum(['SERVICES', 'FOURNITURES', 'TRAVAUX'])
       .default('SERVICES')
@@ -340,9 +344,10 @@ export const marchesonlineRSSFetcherTool = createTool({
   }),
   
   execute: async (inputData: any) => {
-    const { rssUrls, since, typeMarche } = inputData;
+    const { rssUrls, since, until, typeMarche } = inputData;
     
-    const targetDate = since || new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    const startDate = since || new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    const endDate = until || startDate; // Si until absent, mode jour unique
     const allRecords: CanonicalAO[] = [];
     
     // Récupérer tous les flux RSS
@@ -358,9 +363,13 @@ export const marchesonlineRSSFetcherTool = createTool({
             ? new Date(item.pubDate).toISOString().split('T')[0]
             : null;
           
-          // Filtrer par date (toujours, targetDate est toujours calculé - veille si since non fourni)
-          if (pubDate && pubDate !== targetDate) {
-            continue;
+          // Filtrer par date : jour unique (cron) ou plage since→until (manuel)
+          if (pubDate) {
+            if (until) {
+              if (pubDate < startDate || pubDate > endDate) continue;
+            } else {
+              if (pubDate !== startDate) continue;
+            }
           }
           
           // 🆕 FILTRER LES ATTRIBUTIONS (ne pas les traiter comme des AO)
@@ -387,7 +396,7 @@ export const marchesonlineRSSFetcherTool = createTool({
     
     return {
       source: 'MARCHESONLINE',
-      query: { rssUrls, since: targetDate, typeMarche },
+      query: { rssUrls, since: startDate, until: until || undefined, typeMarche },
       total_count: allRecords.length,
       fetched: allRecords.length,
       records: allRecords,

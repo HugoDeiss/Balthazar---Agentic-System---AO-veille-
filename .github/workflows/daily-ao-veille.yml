@@ -12,6 +12,10 @@ on:
         description: 'Date de début (YYYY-MM-DD) - laissez vide pour hier'
         required: false
         type: string
+      until:
+        description: 'Date de fin (YYYY-MM-DD) - optionnel, pour plage (ex: 21/01 au 03/02)'
+        required: false
+        type: string
       clientId:
         description: 'ID du client (laissez vide pour utiliser le défaut)'
         required: false
@@ -29,6 +33,11 @@ jobs:
             echo "since=${{ github.event.inputs.since }}" >> $GITHUB_OUTPUT
           else
             echo "since=$(date -d '1 day ago' '+%Y-%m-%d')" >> $GITHUB_OUTPUT
+          fi
+          if [ -n "${{ github.event.inputs.until }}" ]; then
+            echo "until=${{ github.event.inputs.until }}" >> $GITHUB_OUTPUT
+          else
+            echo "until=" >> $GITHUB_OUTPUT
           fi
       
       - name: 📡 Déterminer activation MarchesOnline
@@ -56,17 +65,18 @@ jobs:
           
           echo "🔍 Lancement de la veille pour le client: $CLIENT_ID"
           echo "📅 Depuis: ${{ steps.date.outputs.since }}"
+          echo "📅 Jusqu'à: ${{ steps.date.outputs.until }}"
           echo "📡 MarchesOnline: ${{ steps.marchesonline.outputs.enabled }}"
+          
+          # Construire le JSON avec until optionnel
+          PAYLOAD="{\"inputData\":{\"clientId\":\"$CLIENT_ID\",\"since\":\"${{ steps.date.outputs.since }}\",\"marchesonlineRSSUrls\":${{ steps.marchesonline.outputs.urls }}}}"
+          if [ -n "${{ steps.date.outputs.until }}" ]; then
+            PAYLOAD=$(echo "$PAYLOAD" | jq --arg u "${{ steps.date.outputs.until }}" '.inputData.until = $u')
+          fi
           
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
             -H "Content-Type: application/json" \
-            -d "{
-              \"inputData\": {
-                \"clientId\": \"$CLIENT_ID\",
-                \"since\": \"${{ steps.date.outputs.since }}\",
-                \"marchesonlineRSSUrls\": ${{ steps.marchesonline.outputs.urls }}
-              }
-            }" \
+            -d "$PAYLOAD" \
             ${{ secrets.MASTRA_CLOUD_URL }}/api/workflows/aoVeilleWorkflow/start-async)
           
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)

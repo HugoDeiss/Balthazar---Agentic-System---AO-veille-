@@ -289,7 +289,11 @@ export const boampFetcherTool = createTool({
   inputSchema: z.object({
     since: z.string()
       .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .describe('Date au format YYYY-MM-DD (ex: 2025-12-17)')
+      .describe('Date au format YYYY-MM-DD (début de période)')
+      .optional(),
+    until: z.string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .describe('Date au format YYYY-MM-DD (fin de période, optionnel)')
       .optional(),
     
     typeMarche: z.enum(['SERVICES', 'FOURNITURES', 'TRAVAUX'])
@@ -303,7 +307,7 @@ export const boampFetcherTool = createTool({
   }),
   
   execute: async (inputData, context) => {
-    const { since, typeMarche, pageSize: rawPageSize } = inputData;
+    const { since, until, typeMarche, pageSize: rawPageSize } = inputData;
     
     // Forcer le maximum à 100 (limite OpenDataSoft)
     const pageSize = Math.min(rawPageSize || 100, 100);
@@ -319,7 +323,13 @@ export const boampFetcherTool = createTool({
     
     const formatDate = (date: Date) => date.toISOString().split('T')[0];
     const targetDate = since || formatDate(yesterday);
+    const endDate = until || targetDate; // Si until absent, mode jour unique
     const minDeadline = formatDate(dateIn7Days);
+    
+    // 1️⃣ TEMPORALITÉ : jour unique (cron) ou plage (manuel)
+    const dateFilter = until
+      ? `dateparution >= date'${targetDate}' AND dateparution <= date'${endDate}'`
+      : `dateparution = date'${targetDate}'`;
     
     // 🔍 WHERE - Version conforme à la documentation OpenDataSoft ODSQL
     // 🧪 MODE TEST : Si TEST_AO_ID est défini, fetch uniquement cet AO (ignore tous les autres filtres)
@@ -327,9 +337,9 @@ export const boampFetcherTool = createTool({
       ? `idweb = '${process.env.TEST_AO_ID}'`
       : (() => {
           const whereFilters = [
-            // 1️⃣ TEMPORALITÉ : Avis publiés la veille (ou date spécifiée)
+            // 1️⃣ TEMPORALITÉ : Avis publiés la veille (ou plage since→until)
             // Format requis : date'YYYY-MM-DD' selon la doc OpenDataSoft
-            `dateparution = date'${targetDate}'`,
+            dateFilter,
             
             // 2️⃣ TYPOLOGIE : Nouveaux avis + Rectificatifs + Annulations
             // IMPORTANT: Pas de retours à la ligne dans WHERE (OpenDataSoft ne les supporte pas)

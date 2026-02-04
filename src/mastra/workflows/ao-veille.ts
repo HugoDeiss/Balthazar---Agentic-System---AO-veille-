@@ -132,11 +132,14 @@ const fetchAndPrequalifyStep = createStep({
   inputSchema: z.object({
     clientId: z.string(),
     since: z.string().optional(),
-    marchesonlineRSSUrls: z.array(z.string().url()).optional() // 🆕 Override optionnel pour MarchesOnline RSS
+    until: z.string().optional(), // Plage : si fourni, fetch since→until ; sinon mode jour unique (cron)
+    marchesonlineRSSUrls: z.array(z.string().url()).optional()
   }),
   outputSchema: z.object({
     prequalified: z.array(aoSchema),
-    client: clientSchema
+    client: clientSchema,
+    since: z.string().optional(),
+    until: z.string().optional()
   }),
   execute: async ({ inputData, requestContext }) => {
     const client = await getClient(inputData.clientId);
@@ -149,9 +152,10 @@ const fetchAndPrequalifyStep = createStep({
     let boampData: any;
     try {
       boampData = await boampFetcherTool.execute!({
-        since: inputData.since, // Optionnel, default = veille
+        since: inputData.since,
+        until: inputData.until,
         typeMarche: client.preferences.typeMarche,
-        pageSize: 100 // Nombre d'AO à récupérer par page (MAX autorisé: 100 par OpenDataSoft)
+        pageSize: 100
       }, {
         requestContext
       }) as {
@@ -256,6 +260,7 @@ const fetchAndPrequalifyStep = createStep({
       marchesonlineData = await marchesonlineRSSFetcherTool.execute!({
         rssUrls: rssUrls,
         since: inputData.since,
+        until: inputData.until,
         typeMarche: client.preferences.typeMarche
       }, {
         requestContext
@@ -316,7 +321,9 @@ const fetchAndPrequalifyStep = createStep({
       prequalified, 
       client,
       fetchStatus: boampData.status,
-      fetchMissing: boampData.missing
+      fetchMissing: boampData.missing,
+      since: inputData.since,
+      until: inputData.until
     };
   }
 });
@@ -328,15 +335,19 @@ const handleCancellationsStep = createStep({
   id: 'handle-cancellations',
   inputSchema: z.object({
     prequalified: z.array(aoSchema),
-    client: clientSchema
+    client: clientSchema,
+    since: z.string().optional(),
+    until: z.string().optional()
   }),
   outputSchema: z.object({
     activeAOs: z.array(aoSchema),
     cancelledCount: z.number(),
-    client: clientSchema
+    client: clientSchema,
+    since: z.string().optional(),
+    until: z.string().optional()
   }),
   execute: async ({ inputData }) => {
-    const { prequalified, client } = inputData;
+    const { prequalified, client, since, until } = inputData;
     const activeAOs: any[] = [];
     let cancelledCount = 0;
     
@@ -431,7 +442,9 @@ const handleCancellationsStep = createStep({
     return { 
       activeAOs, 
       cancelledCount,
-      client 
+      client,
+      since,
+      until
     };
   }
 });
@@ -443,7 +456,9 @@ const detectRectificationStep = createStep({
   id: 'detect-rectification',
   inputSchema: z.object({
     activeAOs: z.array(aoSchema),
-    client: clientSchema
+    client: clientSchema,
+    since: z.string().optional(),
+    until: z.string().optional()
   }),
   outputSchema: z.object({
     toAnalyze: z.array(aoSchema.extend({
@@ -453,10 +468,12 @@ const detectRectificationStep = createStep({
     })),
     rectificationsMineurs: z.number(),
     rectificationsSubstantiels: z.number(),
-    client: clientSchema
+    client: clientSchema,
+    since: z.string().optional(),
+    until: z.string().optional()
   }),
   execute: async ({ inputData }) => {
-    const { activeAOs, client } = inputData;
+    const { activeAOs, client, since, until } = inputData;
     const toAnalyze: any[] = [];
     let rectificationsMineurs = 0;
     let rectificationsSubstantiels = 0;
@@ -551,7 +568,9 @@ const detectRectificationStep = createStep({
       toAnalyze,
       rectificationsMineurs,
       rectificationsSubstantiels,
-      client
+      client,
+      since,
+      until
     };
   }
 });
@@ -571,7 +590,9 @@ const filterAlreadyAnalyzedStep = createStep({
     })),
     rectificationsMineurs: z.number(),
     rectificationsSubstantiels: z.number(),
-    client: clientSchema
+    client: clientSchema,
+    since: z.string().optional(),
+    until: z.string().optional()
   }),
   outputSchema: z.object({
     toAnalyze: z.array(aoSchema.extend({
@@ -582,10 +603,12 @@ const filterAlreadyAnalyzedStep = createStep({
     rectificationsMineurs: z.number(),
     rectificationsSubstantiels: z.number(),
     skipped: z.number(),
-    client: clientSchema
+    client: clientSchema,
+    since: z.string().optional(),
+    until: z.string().optional()
   }),
   execute: async ({ inputData }) => {
-    const { toAnalyze, rectificationsMineurs, rectificationsSubstantiels, client } = inputData;
+    const { toAnalyze, rectificationsMineurs, rectificationsSubstantiels, client, since, until } = inputData;
     
     console.log(`🔍 Vérification des AO déjà analysés (${toAnalyze.length} AO)...`);
     
@@ -649,7 +672,9 @@ const filterAlreadyAnalyzedStep = createStep({
       rectificationsMineurs,
       rectificationsSubstantiels,
       skipped,
-      client
+      client,
+      since,
+      until
     };
   }
 });
@@ -668,7 +693,9 @@ const keywordMatchingStep = createStep({
     rectificationsMineurs: z.number(),
     rectificationsSubstantiels: z.number(),
     skipped: z.number().optional(),
-    client: clientSchema
+    client: clientSchema,
+    since: z.string().optional(),
+    until: z.string().optional()
   }),
   outputSchema: z.object({
     keywordMatched: z.array(aoSchema.extend({
@@ -683,10 +710,12 @@ const keywordMatchingStep = createStep({
       _originalAO: z.any().optional(),
       _changes: z.any().optional()
     })),
-    client: clientSchema
+    client: clientSchema,
+    since: z.string().optional(),
+    until: z.string().optional()
   }),
   execute: async ({ inputData }) => {
-    const { toAnalyze: prequalified, client } = inputData;
+    const { toAnalyze: prequalified, client, since, until } = inputData;
     
     console.log(`🔍 Keyword matching amélioré (lexique Balthazar) sur ${prequalified.length} AO...`);
     
@@ -746,7 +775,7 @@ const keywordMatchingStep = createStep({
       console.log(`   📋 Raisons: ${JSON.stringify(skipReasons)}`);
     }
     
-    return { keywordMatched, client };
+    return { keywordMatched, client, since, until };
   }
 });
 
@@ -832,10 +861,12 @@ const saveResultsStep = createStep({
       BOAMP: z.array(z.any()),
       MARCHESONLINE: z.array(z.any())
     }),
-    client: clientSchema.nullable()
+    client: clientSchema.nullable(),
+    since: z.string().optional(),
+    until: z.string().optional()
   }),
   execute: async ({ inputData }) => {
-    const { all: scored, client, stats } = inputData;
+    const { all: scored, client, stats, since, until } = inputData;
     
     // Gérer le cas où client est null (aucun AO à sauvegarder)
     if (!client) {
@@ -851,7 +882,9 @@ const saveResultsStep = createStep({
         highBySource: inputData.highBySource,
         mediumBySource: inputData.mediumBySource,
         lowBySource: inputData.lowBySource,
-        client: null
+        client: null,
+        since,
+        until
       };
     }
     
@@ -1055,7 +1088,9 @@ const saveResultsStep = createStep({
       highBySource: inputData.highBySource,
       mediumBySource: inputData.mediumBySource,
       lowBySource: inputData.lowBySource,
-      client: inputData.client
+      client: inputData.client,
+      since: inputData.since,
+      until: inputData.until
     };
   }
 });
@@ -1098,7 +1133,9 @@ const sendEmailStep = createStep({
       BOAMP: z.array(z.any()),
       MARCHESONLINE: z.array(z.any())
     }),
-    client: clientSchema.nullable()
+    client: clientSchema.nullable(),
+    since: z.string().optional(),
+    until: z.string().optional()
   }),
   outputSchema: z.object({
     emailSent: z.boolean()
@@ -1113,10 +1150,11 @@ const sendEmailStep = createStep({
     }
 
     // ────────────────────────────────────────────────────────────
-    // 2. CALCUL DE LA DATE (date d'aujourd'hui - date du rapport)
+    // 2. DATE POUR L'EMAIL : plage (since→until) ou jour unique (veille)
     // ────────────────────────────────────────────────────────────
+    const { since, until } = inputData;
     const today = new Date();
-    const dateStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
+    const singleDate = since || today.toISOString().split('T')[0];
 
     // ────────────────────────────────────────────────────────────
     // 3. ORGANISATION DES DONNÉES POUR LE TEMPLATE
@@ -1186,7 +1224,8 @@ const sendEmailStep = createStep({
     // 4. PRÉPARATION DES DONNÉES POUR LE TEMPLATE
     // ────────────────────────────────────────────────────────────
     const emailData: EmailData = {
-      date: dateStr,
+      date: singleDate,
+      ...(since && until && { dateRange: { since, until } }),
       statsBySource: inputData.statsBySource,
       relevantAOs,
       lowPriorityAOs,
@@ -1819,7 +1858,7 @@ const normalizeBranchResultsStep = createStep({
 const aggregateResultsStep = createStep({
   id: 'aggregate-results',
   inputSchema: z.array(z.object({
-    ao: z.any(), // AO enrichi avec tous les scores
+    ao: z.any(),
     client: clientSchema
   })),
   outputSchema: z.object({
@@ -1864,7 +1903,9 @@ const aggregateResultsStep = createStep({
     lowBySource: z.object({
       BOAMP: z.array(z.any()),
       MARCHESONLINE: z.array(z.any())
-    })
+    }),
+    since: z.string().optional(),
+    until: z.string().optional()
   }),
   execute: async ({ inputData }) => {
     console.log(`📊 Agrégation de ${inputData.length} AO traités...`);
@@ -1899,7 +1940,9 @@ const aggregateResultsStep = createStep({
         },
         highBySource: { BOAMP: [], MARCHESONLINE: [] },
         mediumBySource: { BOAMP: [], MARCHESONLINE: [] },
-        lowBySource: { BOAMP: [], MARCHESONLINE: [] }
+        lowBySource: { BOAMP: [], MARCHESONLINE: [] },
+        since: undefined,
+        until: undefined
       };
     }
     
@@ -1909,9 +1952,12 @@ const aggregateResultsStep = createStep({
     const allAOs = inputData.map(item => item.ao);
     
     // ────────────────────────────────────────────────────────────
-    // 3. RÉCUPÉRATION DU CLIENT (explicite, pas de getStepResult)
+    // 3. RÉCUPÉRATION DU CLIENT ET DE LA PLAGE DE DATES
     // ────────────────────────────────────────────────────────────
     const client = inputData[0].client;
+    const dateRange = (client as any)._dateRange;
+    const since = dateRange?.since;
+    const until = dateRange?.until;
     
     // ────────────────────────────────────────────────────────────
     // 3. SÉPARATION PAR CATÉGORIE (tri simple, pas d'intelligence)
@@ -2008,6 +2054,8 @@ const aggregateResultsStep = createStep({
       medium,
       low,
       cancelled,
+      since,
+      until,
       stats: {
         total,
         analysed,
@@ -2039,7 +2087,8 @@ export const aoVeilleWorkflow = createWorkflow({
   inputSchema: z.object({
     clientId: z.string(),
     since: z.string().optional(),
-    marchesonlineRSSUrls: z.array(z.string().url()).optional() // 🆕 Override optionnel pour MarchesOnline RSS
+    until: z.string().optional(), // Plage : si fourni avec since, fetch since→until ; sinon mode jour unique (cron)
+    marchesonlineRSSUrls: z.array(z.string().url()).optional()
   }),
   outputSchema: z.object({
     saved: z.number(),
@@ -2066,15 +2115,10 @@ export const aoVeilleWorkflow = createWorkflow({
   // en tableau pur [{ ao: AO1, client }, { ao: AO2, client }, ...]
   // pour permettre l'utilisation de .foreach()
   .map(async ({ inputData }) => {
-    const { keywordMatched, client } = inputData;
-    
-    // Chaque élément du tableau contient l'AO ET le client
-    // Le client est dupliqué dans chaque élément car Mastra
-    // ne partage pas implicitement le contexte entre itérations
-    return keywordMatched.map(ao => ({ 
-      ao, 
-      client 
-    }));
+    const { keywordMatched, client, since, until } = inputData;
+    // Stocker since/until dans client pour propagation (foreach ne transmet pas les champs supplémentaires)
+    const clientWithDateRange = { ...client, _dateRange: since && until ? { since, until } : undefined } as any;
+    return keywordMatched.map(ao => ({ ao, client: clientWithDateRange }));
   })
   
   // ═══════════════════════════════════════════════════════
