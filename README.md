@@ -424,6 +424,7 @@ Le serveur Mastra démarre sur `http://localhost:4111` (port configuré dans `sr
 - **[BOAMP_FETCH.md](./BOAMP_FETCH.md)** - Documentation technique complète de l'outil BOAMP
 - **[MARCHESONLINE_RSS_FETCH.md](./MARCHESONLINE_RSS_FETCH.md)** - Documentation technique complète de l'outil MarchesOnline RSS
 - **[WORKFLOW_AO_VEILLE.md](./WORKFLOW_AO_VEILLE.md)** - Documentation détaillée du workflow d'analyse
+- **[GITHUB_WORKFLOW_QUOTIDIEN.md](./GITHUB_WORKFLOW_QUOTIDIEN.md)** - Documentation du déclenchement automatique quotidien via GitHub Actions
 
 ---
 
@@ -469,7 +470,13 @@ console.log(`${result.high} HIGH, ${result.medium} MEDIUM`);
 
 ### Automatisation Quotidienne
 
-Voir les scripts dans `scripts/` :
+Le système s'exécute automatiquement chaque jour via **GitHub Actions** :
+
+- 🕐 **Déclenchement** : Tous les jours à 6h00 UTC (7h Paris hiver, 8h été)
+- 🤖 **Workflow GitHub** : `.github/workflows/daily-ao-veille.yml`
+- 🔗 **Documentation complète** : `GITHUB_WORKFLOW_QUOTIDIEN.md`
+
+**Voir aussi** les scripts dans `scripts/` pour retry manuel :
 - `schedule-retry.ts` - Planifier un retry
 - `retry-boamp-fetch.ts` - Exécuter un retry
 - `process-retry-queue.ts` - Traiter la queue (cron)
@@ -662,6 +669,7 @@ Pour toute question ou problème :
   - `BOAMP_FETCH.md` - Documentation de l'outil BOAMP
   - `MARCHESONLINE_RSS_FETCH.md` - Documentation de l'outil MarchesOnline RSS
   - `WORKFLOW_AO_VEILLE.md` - Documentation du workflow principal
+  - `GITHUB_WORKFLOW_QUOTIDIEN.md` - Documentation du déclenchement automatique quotidien
 
 ---
 
