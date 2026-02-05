@@ -58,11 +58,17 @@ jobs:
       - name: 🚀 Déclencher le workflow AO Veille
         id: trigger
         run: |
+          # GitHub Actions = orchestration uniquement :
+          # on déclenche le workflow Mastra et on vérifie le code HTTP.
+          # Ne pas stocker de gros JSON dans les outputs (risque de dépassement mémoire côté expressions GitHub).
+          RUN_ID="gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
           CLIENT_ID="${{ github.event.inputs.clientId }}"
           if [ -z "$CLIENT_ID" ]; then
             CLIENT_ID="${{ secrets.BALTHAZAR_CLIENT_ID }}"
           fi
           
+          echo "🔗 GitHub Run ID: $RUN_ID"
           echo "🔍 Lancement de la veille pour le client: $CLIENT_ID"
           echo "📅 Depuis: ${{ steps.date.outputs.since }}"
           echo "📅 Jusqu'à: ${{ steps.date.outputs.until }}"
@@ -76,29 +82,35 @@ jobs:
           
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
             -H "Content-Type: application/json" \
+            -H "X-GitHub-Run-Id: $RUN_ID" \
             -d "$PAYLOAD" \
             ${{ secrets.MASTRA_CLOUD_URL }}/api/workflows/aoVeilleWorkflow/start-async)
-          
+
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | sed '$d')
-          
-          echo "response=$BODY" >> $GITHUB_OUTPUT
+
           echo "http_code=$HTTP_CODE" >> $GITHUB_OUTPUT
-          
+
           echo "📊 Code HTTP: $HTTP_CODE"
-          echo "📦 Réponse: $BODY"
+          # Prévisualisation tronquée de la réponse pour garder des logs lisibles
+          MAX_PREVIEW_CHARS=4000
+          BODY_PREVIEW="$BODY"
+          if [ ${#BODY_PREVIEW} -gt $MAX_PREVIEW_CHARS ]; then
+            BODY_PREVIEW="${BODY_PREVIEW:0:$MAX_PREVIEW_CHARS}...[truncated]"
+          fi
+          echo "📦 Réponse (preview): $BODY_PREVIEW"
       
       - name: ✅ Vérifier le succès
-        if: steps.trigger.outputs.http_code == '200'
+        if: startsWith(steps.trigger.outputs.http_code, '2')
         run: |
-          echo "✅ Workflow exécuté avec succès !"
-          echo "📊 Résultat: ${{ steps.trigger.outputs.response }}"
+          echo "✅ Workflow exécuté avec succès (code HTTP 2xx)."
+          echo "ℹ️  Voir les logs de l'étape '🚀 Déclencher le workflow AO Veille' pour le détail de la réponse Mastra."
       
       - name: ❌ Gérer l'échec
-        if: steps.trigger.outputs.http_code != '200'
+        if: !startsWith(steps.trigger.outputs.http_code, '2')
         run: |
           echo "❌ Le workflow a échoué avec le code HTTP: ${{ steps.trigger.outputs.http_code }}"
-          echo "📦 Réponse: ${{ steps.trigger.outputs.response }}"
+          echo "ℹ️  Voir les logs de l'étape '🚀 Déclencher le workflow AO Veille' pour le détail de la réponse Mastra."
           exit 1
       
       - name: 📧 Notifier en cas d'échec
