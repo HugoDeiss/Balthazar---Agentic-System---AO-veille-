@@ -101,13 +101,13 @@ jobs:
           echo "📦 Réponse (preview): $BODY_PREVIEW"
       
       - name: ✅ Vérifier le succès
-        if: startsWith(steps.trigger.outputs.http_code, '2')
+        if: ${{ startsWith(steps.trigger.outputs.http_code, '2') }}
         run: |
           echo "✅ Workflow exécuté avec succès (code HTTP 2xx)."
           echo "ℹ️  Voir les logs de l'étape '🚀 Déclencher le workflow AO Veille' pour le détail de la réponse Mastra."
       
       - name: ❌ Gérer l'échec
-        if: !startsWith(steps.trigger.outputs.http_code, '2')
+        if: ${{ !startsWith(steps.trigger.outputs.http_code, '2') }}
         run: |
           echo "❌ Le workflow a échoué avec le code HTTP: ${{ steps.trigger.outputs.http_code }}"
           echo "ℹ️  Voir les logs de l'étape '🚀 Déclencher le workflow AO Veille' pour le détail de la réponse Mastra."
