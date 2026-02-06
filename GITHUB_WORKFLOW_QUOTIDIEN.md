@@ -519,7 +519,7 @@ Error: The template is not valid.
 
 **Cause** : Utilisation d'un gros JSON dans une expression GitHub `${{ steps.trigger.outputs.response }}`
 
-**Solution** : ✅ **Déjà corrigé dans la version actuelle**
+**Solution** : ✅ **Déjà corrigé dans la version v2.0**
 - On ne stocke plus la réponse complète dans les outputs
 - Seulement `http_code` (court)
 - Le JSON est affiché dans les logs shell uniquement
@@ -607,22 +607,31 @@ Error: The template is not valid.
 ❌ Le workflow a échoué avec le code HTTP: 500
 ```
 
-**Cause** : Erreur côté serveur Mastra (bug, crash, timeout…)
+**Cause** : Erreur côté serveur Mastra (bug, crash, timeout…) OU JSON invalide envoyé
 
-**Solutions** :
+**Solution** : ✅ **Déjà corrigé dans la version v3.0**
+- Construction JSON sécurisée avec `jq` (évite les JSON cassés)
+- Validation du payload avant envoi
+- Retry automatique (3 tentatives) sur erreurs 5xx
+- Payload affiché dans les logs si erreur
 
-1. **Vérifier les logs Mastra Cloud**
-   - Dashboard Mastra → Logs → Filtrer par timestamp du run GitHub
+**Si ça persiste après 3 tentatives** :
+
+1. **Vérifier les logs GitHub**
+   - Regarder le payload affiché dans les logs (section "⚠️ PAYLOAD ENVOYÉ")
+   - Vérifier qu'il est bien formé (pas de caractères bizarres)
+
+2. **Vérifier les logs Mastra Cloud**
+   - Dashboard Mastra → Logs → Filtrer par `X-GitHub-Run-Id`
    - Identifier l'erreur exacte (stack trace, timeout…)
 
-2. **Vérifier le payload envoyé**
-   - Regarder les logs GitHub de la step "🚀 Déclencher le workflow AO Veille"
-   - Vérifier que le JSON `PAYLOAD` est bien formé
-   - Tester le même payload en `curl` manuel depuis un terminal
+3. **Tester manuellement**
+   - Copier le payload depuis les logs GitHub
+   - Tester avec `curl` depuis ton terminal (voir section "Debugging et Corrélation")
 
-3. **Retry manuel**
-   - Souvent, les erreurs 500 sont transitoires (surcharge, timeout réseau…)
-   - Relancer le workflow manuellement avec "Re-run failed jobs"
+4. **Vérifier la disponibilité de Mastra**
+   - Si le health check montre "timeout", Mastra est peut-être down
+   - Attendre quelques minutes et relancer
 
 ---
 
@@ -694,26 +703,48 @@ Via l'interface GitHub Actions :
 
 ### Avant le Premier Déploiement
 
-- [ ] Secrets GitHub configurés (`BALTHAZAR_CLIENT_ID`, `MASTRA_CLOUD_URL`)
-- [ ] Workflow testé manuellement via `workflow_dispatch`
-- [ ] Code HTTP 2xx confirmé dans les logs GitHub
-- [ ] Corrélation GitHub ↔ Mastra vérifiée (via `X-GitHub-Run-Id`)
-- [ ] Logs Mastra confirment la réception et l'exécution du workflow
-- [ ] Preview tronqué testé avec une grosse réponse (> 4000 chars)
-- [ ] Test d'échec volontaire (mauvais `clientId`) pour vérifier la step `❌`
+- [ ] **Secrets GitHub configurés** :
+  - [ ] `BALTHAZAR_CLIENT_ID` : ID du client (ex: `balthazar`)
+  - [ ] `MASTRA_CLOUD_URL` : URL complète **sans trailing slash** (ex: `https://balthazar-tender-monitoring.mastra.cloud`)
+- [ ] **Workflow testé manuellement** via `workflow_dispatch`
+- [ ] **Logs GitHub vérifiés** :
+  - [ ] Health check montre "✅ Mastra Cloud est accessible"
+  - [ ] Payload JSON validé avec succès
+  - [ ] Code HTTP 2xx confirmé
+  - [ ] Retry fonctionne (tester avec Mastra temporairement down si possible)
+- [ ] **Corrélation GitHub ↔ Mastra vérifiée** :
+  - [ ] `X-GitHub-Run-Id` présent dans les logs GitHub
+  - [ ] Logs Mastra confirment la réception du workflow
+  - [ ] Possibilité de retrouver un run GitHub dans Mastra via le Run ID
+- [ ] **Tests d'erreur** :
+  - [ ] Test avec `clientId` invalide → échec propre avec guide de debug
+  - [ ] Test avec URL Mastra incorrecte → échec après 3 tentatives
+  - [ ] Payload affiché dans les logs en cas d'erreur
 
 ### Monitoring Continu
 
-- [ ] Email d'alerte configuré (step 6 ou via GitHub notifications)
-- [ ] Dashboard Mastra Cloud ajouté aux favoris pour accès rapide
-- [ ] Documentation partagée avec l'équipe (lien vers ce fichier)
-- [ ] Procédure de debug documentée (voir section précédente)
+- [ ] **Alertes configurées** :
+  - [ ] Email d'alerte GitHub activé (Settings → Notifications → Actions → "Only failures")
+  - [ ] Optionnel : Slack/PagerDuty dans la step "📧 Notifier en cas d'échec"
+- [ ] **Accès rapides** :
+  - [ ] Dashboard Mastra Cloud ajouté aux favoris
+  - [ ] Lien GitHub Actions dans les favoris
+- [ ] **Documentation** :
+  - [ ] Équipe informée de l'existence de `GITHUB_WORKFLOW_QUOTIDIEN.md`
+  - [ ] Procédure de debug partagée
 
 ### Maintenance Hebdomadaire
 
-- [ ] Vérifier le taux de succès des 7 derniers jours (cible : 100%)
-- [ ] Vérifier les logs Mastra pour détecter des patterns d'erreur
-- [ ] Contrôler que les AO sont bien sauvegardés dans Supabase
+- [ ] **Vérifier le taux de succès** des 7 derniers jours (cible : 100%)
+- [ ] **Analyser les échecs** :
+  - [ ] Vérifier si retry a résolu des erreurs transitoires
+  - [ ] Identifier des patterns d'erreur récurrents
+- [ ] **Contrôler les données** :
+  - [ ] Vérifier que les AO sont bien sauvegardés dans Supabase
+  - [ ] Vérifier la corrélation entre runs GitHub et exécutions Mastra
+- [ ] **Performance** :
+  - [ ] Temps d'exécution moyen du workflow
+  - [ ] Nombre de retry nécessaires (si élevé → investiguer Mastra Cloud)
 
 ---
 
@@ -728,6 +759,33 @@ Via l'interface GitHub Actions :
 ---
 
 ## 📝 Historique des Changements
+
+### 2026-02-06 : Gestion Robuste des Erreurs (v3.0)
+
+**Problème résolu** :
+- ❌ Erreur 500 "Unexpected token" causée par JSON invalide
+- ❌ Construction fragile du payload par concaténation de strings
+- ❌ Pas de retry sur erreurs transitoires de Mastra Cloud
+- ❌ Difficile de déboguer les échecs (payload non affiché)
+
+**Changements appliqués** :
+- ✅ **Construction JSON sécurisée avec `jq`** : échappement automatique des caractères spéciaux
+- ✅ **Validation du payload** : vérification avant envoi pour détecter les JSON invalides
+- ✅ **Retry automatique** : 3 tentatives avec délai de 10s sur erreurs 5xx
+- ✅ **Health check de Mastra Cloud** : vérification préalable de disponibilité
+- ✅ **Logging amélioré** : payload affiché en cas d'erreur, timestamp UTC, logs structurés
+- ✅ **Guide de debug** : actions recommandées dans la step d'échec
+
+**Impact** :
+- 🛡️ Résilience accrue face aux erreurs transitoires
+- 🔍 Debugging facilité avec logs complets
+- ⚡ Détection précoce des problèmes de configuration
+- 📊 Meilleure observabilité du workflow
+
+**Commit** :
+- `fix(workflow): robust error handling and JSON construction`
+
+---
 
 ### 2026-02-05 : Refonte Complète (v2.0)
 
