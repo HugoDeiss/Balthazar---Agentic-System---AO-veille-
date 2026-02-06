@@ -73,32 +73,117 @@ jobs:
           echo "📅 Depuis: ${{ steps.date.outputs.since }}"
           echo "📅 Jusqu'à: ${{ steps.date.outputs.until }}"
           echo "📡 MarchesOnline: ${{ steps.marchesonline.outputs.enabled }}"
+          echo ""
           
-          # Construire le JSON avec until optionnel
-          PAYLOAD="{\"inputData\":{\"clientId\":\"$CLIENT_ID\",\"since\":\"${{ steps.date.outputs.since }}\",\"marchesonlineRSSUrls\":${{ steps.marchesonline.outputs.urls }}}}"
-          if [ -n "${{ steps.date.outputs.until }}" ]; then
-            PAYLOAD=$(echo "$PAYLOAD" | jq --arg u "${{ steps.date.outputs.until }}" '.inputData.until = $u')
+          # Health check optionnel de Mastra Cloud
+          echo "🏥 Vérification de la disponibilité de Mastra Cloud..."
+          HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 ${{ secrets.MASTRA_CLOUD_URL }} || echo "000")
+          
+          if [ "$HEALTH_CHECK" = "000" ]; then
+            echo "⚠️  Mastra Cloud ne répond pas (timeout)"
+          elif [ "$HEALTH_CHECK" = "200" ] || [ "$HEALTH_CHECK" = "404" ]; then
+            echo "✅ Mastra Cloud est accessible (code $HEALTH_CHECK)"
+          else
+            echo "⚠️  Mastra Cloud répond avec le code $HEALTH_CHECK"
+          fi
+          echo ""
+          
+          # Construire le JSON de manière sécurisée avec jq
+          echo "📦 Construction du payload JSON..."
+          PAYLOAD=$(jq -n \
+            --arg clientId "$CLIENT_ID" \
+            --arg since "${{ steps.date.outputs.since }}" \
+            --arg until "${{ steps.date.outputs.until }}" \
+            --argjson urls '${{ steps.marchesonline.outputs.urls }}' \
+            '{
+              inputData: {
+                clientId: $clientId,
+                since: $since,
+                marchesonlineRSSUrls: $urls
+              } + (if $until != "" then {until: $until} else {} end)
+            }')
+          
+          echo "📦 Payload construit (compact):"
+          echo "$PAYLOAD" | jq -c '.'
+          
+          # Valider que le JSON est bien formé
+          if ! echo "$PAYLOAD" | jq empty 2>/dev/null; then
+            echo "❌ ERREUR CRITIQUE: Le payload JSON est invalide"
+            echo "$PAYLOAD"
+            exit 1
+          fi
+          echo "✅ Payload JSON validé"
+          echo ""
+          
+          # Retry logic pour gérer les erreurs transitoires
+          MAX_RETRIES=3
+          RETRY_DELAY=10  # secondes
+          SUCCESS=false
+          
+          for attempt in $(seq 1 $MAX_RETRIES); do
+            echo "🔄 Tentative $attempt/$MAX_RETRIES..."
+            
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+              -H "Content-Type: application/json" \
+              -H "X-GitHub-Run-Id: $RUN_ID" \
+              -d "$PAYLOAD" \
+              ${{ secrets.MASTRA_CLOUD_URL }}/api/workflows/aoVeilleWorkflow/start-async)
+            
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+            
+            echo "📊 Code HTTP: $HTTP_CODE"
+            
+            # Si succès (2xx) ou erreur client (4xx), on arrête
+            if [[ "$HTTP_CODE" =~ ^2 ]]; then
+              echo "✅ Succès (code $HTTP_CODE)"
+              SUCCESS=true
+              break
+            elif [[ "$HTTP_CODE" =~ ^4 ]]; then
+              echo "❌ Erreur client (code $HTTP_CODE) - Pas de retry"
+              break
+            fi
+            
+            # Si erreur serveur (5xx) et pas la dernière tentative, on retry
+            if [ $attempt -lt $MAX_RETRIES ]; then
+              echo "⚠️  Erreur serveur (code $HTTP_CODE), retry dans ${RETRY_DELAY}s..."
+              sleep $RETRY_DELAY
+            else
+              echo "❌ Échec après $MAX_RETRIES tentatives"
+            fi
+          done
+          
+          # Vérifier le succès final
+          if [ "$SUCCESS" != "true" ] && [[ ! "$HTTP_CODE" =~ ^2 ]]; then
+            echo "❌ Le workflow n'a pas pu être déclenché"
           fi
           
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-            -H "Content-Type: application/json" \
-            -H "X-GitHub-Run-Id: $RUN_ID" \
-            -d "$PAYLOAD" \
-            ${{ secrets.MASTRA_CLOUD_URL }}/api/workflows/aoVeilleWorkflow/start-async)
-
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
-
           echo "http_code=$HTTP_CODE" >> $GITHUB_OUTPUT
-
+          
+          echo ""
+          echo "═══════════════════════════════════════"
+          echo "📊 Résultat Final"
+          echo "═══════════════════════════════════════"
+          echo "🔗 GitHub Run ID: $RUN_ID"
           echo "📊 Code HTTP: $HTTP_CODE"
-          # Prévisualisation tronquée de la réponse pour garder des logs lisibles
+          echo "🕐 Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          
+          # Preview tronqué de la réponse
           MAX_PREVIEW_CHARS=4000
           BODY_PREVIEW="$BODY"
           if [ ${#BODY_PREVIEW} -gt $MAX_PREVIEW_CHARS ]; then
             BODY_PREVIEW="${BODY_PREVIEW:0:$MAX_PREVIEW_CHARS}...[truncated]"
           fi
-          echo "📦 Réponse (preview): $BODY_PREVIEW"
+          echo "📦 Réponse (preview):"
+          echo "$BODY_PREVIEW"
+          
+          # Si erreur, afficher le payload pour debug
+          if [[ ! "$HTTP_CODE" =~ ^2 ]]; then
+            echo ""
+            echo "⚠️  PAYLOAD ENVOYÉ (pour debug):"
+            echo "$PAYLOAD" | jq '.'
+          fi
+          echo "═══════════════════════════════════════"
       
       - name: ✅ Vérifier le succès
         if: ${{ startsWith(steps.trigger.outputs.http_code, '2') }}
@@ -110,7 +195,14 @@ jobs:
         if: ${{ !startsWith(steps.trigger.outputs.http_code, '2') }}
         run: |
           echo "❌ Le workflow a échoué avec le code HTTP: ${{ steps.trigger.outputs.http_code }}"
-          echo "ℹ️  Voir les logs de l'étape '🚀 Déclencher le workflow AO Veille' pour le détail de la réponse Mastra."
+          echo ""
+          echo "🔍 Actions de debug recommandées:"
+          echo "1. Vérifier les logs de l'étape '🚀 Déclencher le workflow AO Veille'"
+          echo "2. Vérifier le payload JSON envoyé (affiché dans les logs si erreur)"
+          echo "3. Vérifier les logs Mastra Cloud pour le GitHub Run ID"
+          echo "4. Tester manuellement avec curl (voir GITHUB_WORKFLOW_QUOTIDIEN.md)"
+          echo ""
+          echo "📚 Documentation: GITHUB_WORKFLOW_QUOTIDIEN.md"
           exit 1
       
       - name: 📧 Notifier en cas d'échec
