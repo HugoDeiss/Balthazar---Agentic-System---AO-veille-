@@ -96,11 +96,13 @@ jobs:
             --arg until "${{ steps.date.outputs.until }}" \
             --argjson urls '${{ steps.marchesonline.outputs.urls }}' \
             '{
-              inputData: {
-                clientId: $clientId,
-                since: $since,
-                marchesonlineRSSUrls: $urls
-              } + (if $until != "" then {until: $until} else {} end)
+              inputData: (
+                {
+                  clientId: $clientId,
+                  since: $since,
+                  marchesonlineRSSUrls: $urls
+                } | if $until != "" then . + {until: $until} else . end
+              )
             }')
           
           echo "📦 Payload construit (compact):"
