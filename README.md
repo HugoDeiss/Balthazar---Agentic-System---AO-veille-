@@ -425,6 +425,7 @@ Le serveur Mastra démarre sur `http://localhost:4111` (port configuré dans `sr
 - **[MARCHESONLINE_RSS_FETCH.md](./MARCHESONLINE_RSS_FETCH.md)** - Documentation technique complète de l'outil MarchesOnline RSS
 - **[WORKFLOW_AO_VEILLE.md](./WORKFLOW_AO_VEILLE.md)** - Documentation détaillée du workflow d'analyse
 - **[GITHUB_WORKFLOW_QUOTIDIEN.md](./GITHUB_WORKFLOW_QUOTIDIEN.md)** - Documentation du déclenchement automatique quotidien via GitHub Actions
+- **[CHECKLIST_PRE_PUSH_WORKFLOW.md](./CHECKLIST_PRE_PUSH_WORKFLOW.md)** - Checklist complète à utiliser avant chaque modification du workflow GitHub Actions
 
 ---
 

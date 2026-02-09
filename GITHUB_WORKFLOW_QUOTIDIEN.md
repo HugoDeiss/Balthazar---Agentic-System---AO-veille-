@@ -701,6 +701,8 @@ Via l'interface GitHub Actions :
 
 ## 🎯 Checklist de Mise en Production
 
+> **📋 Pour les modifications futures du workflow** : Utilise la **[CHECKLIST_PRE_PUSH_WORKFLOW.md](./CHECKLIST_PRE_PUSH_WORKFLOW.md)** qui contient une checklist complète et détaillée à suivre avant chaque push.
+
 ### Avant le Premier Déploiement
 
 - [ ] **Secrets GitHub configurés** :
