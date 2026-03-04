@@ -1,0 +1,769 @@
+[
+  {
+    "id": "eval_001",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Reprise et finalisation amenagement foncier agricole AFAF RN135",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-7214",
+    "raison_ia": "secteur public, pas transformation stratégique",
+    "bzs": "Secteur non pertinent et AO non pertinent en effet",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": true,
+    "category": "clear_reject",
+    "policy_expected": [
+      "pol_exclusions_formelles"
+    ],
+    "gap": null,
+    "notes": "Aménagement foncier/travaux agricoles hors périmètre absolu"
+  },
+  {
+    "id": "eval_002",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Prestation assurance risques statutaires collectivités CDG 26",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-10617",
+    "raison_ia": "secteur assurance pertinent, pas transformation",
+    "bzs": "Supprimer AO prestation assurance, identifier assurance via clients MAIF Groupama",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_secteur_assurance"
+    ],
+    "gap": null,
+    "notes": "Piège: assurance=contrat pas secteur. IA REJECT correct mais raison fausse dit secteur pertinent"
+  },
+  {
+    "id": "eval_003",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "COMPLEMENTAIRE SANTE ESAT LES TROIS FONTAINES ETABLISSEMENT PUBLIC",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-9237",
+    "raison_ia": "secteur pertinent, pas transformation",
+    "bzs": "Non secteur cible, pas secteur santé mais secteur public",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_secteur_assurance",
+      "pol_secteur_public"
+    ],
+    "gap": "pol_secteur_public doit préciser santé/complémentaire santé hors scope même émetteur public",
+    "notes": "Mutuelle/complémentaire santé agents publics pas secteur assurance stratégique"
+  },
+  {
+    "id": "eval_004",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "TRANSPORTS SANITAIRES PATIENTS HOSPITALISES GHT HAUTE SAVOIE",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-8751",
+    "raison_ia": "secteur pertinent, pas transformation",
+    "bzs": "Secteur non pertinent",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_secteur_mobilite",
+      "pol_disambiguation_mobilite_exclusions"
+    ],
+    "gap": null,
+    "notes": "Transport sanitaire hors scope. IA dit secteur pertinent à tort"
+  },
+  {
+    "id": "eval_005",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Externalisation gestion entrées en formation stagiaires formation professionnelle",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-9936",
+    "raison_ia": "secteur pertinent, pas transformation",
+    "bzs": "Secteur non pertinent",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "clear_reject",
+    "policy_expected": [
+      "pol_exclusions_formelles"
+    ],
+    "gap": null,
+    "notes": "Externalisation gestion formation = opérationnel"
+  },
+  {
+    "id": "eval_006",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Services transports routiers non urbains élèves véhicules moins 10 places",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-7849",
+    "raison_ia": "secteur pertinent, pas transformation",
+    "bzs": "Transport scolaire ne nous correspond pas",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_disambiguation_mobilite_exclusions"
+    ],
+    "gap": null,
+    "notes": "Transport scolaire exclusion explicite. Volume élevé de ce type"
+  },
+  {
+    "id": "eval_007",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "AMO conventions participation prestations sociales mutuelle prévoyance Département Charente",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-9560",
+    "raison_ia": "secteur pertinent, pas transformation",
+    "bzs": "Secteur non pertinent, mutuelle=création convention pas accompagnement assureur",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_secteur_assurance",
+      "pol_disambiguation_amo"
+    ],
+    "gap": null,
+    "notes": "Double piège AMO+mutuelle. AMO technique RH, mutuelle=convention collective agents"
+  },
+  {
+    "id": "eval_008",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Exécution transports scolaires élèves étudiants handicap",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-7863",
+    "raison_ia": "secteur pertinent, pas transformation",
+    "bzs": "Transport scolaire ne nous correspond pas",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_disambiguation_mobilite_exclusions"
+    ],
+    "gap": null,
+    "notes": "Transport scolaire adapté MDPH variante. Récurrent."
+  },
+  {
+    "id": "eval_009",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "TRANSPORTS SCOLAIRES ADAPTÉS ÉLÈVES HAUTS DE SEINE",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-9213",
+    "raison_ia": "secteur pertinent, pas transformation",
+    "bzs": "Transport scolaire ne nous correspond pas",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_disambiguation_mobilite_exclusions"
+    ],
+    "gap": null,
+    "notes": "Transport scolaire adapté même pattern récurrent"
+  },
+  {
+    "id": "eval_010",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Prestations déménagement manutention transport garde-meuble collèges",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-8037",
+    "raison_ia": "secteur pertinent, pas transformation",
+    "bzs": "Secteur non pertinent",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_secteur_mobilite"
+    ],
+    "gap": "Ajouter transport déménagement logistique opérationnelle dans exclusions mobilité",
+    "notes": "Transport logistique opérationnel. Mot transport déclenche faux positif mobilité"
+  },
+  {
+    "id": "eval_011",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Services interprétariat traduction département",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-8347",
+    "raison_ia": "secteur pertinent, pas transformation",
+    "bzs": "Secteur non pertinent",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "clear_reject",
+    "policy_expected": [
+      "pol_exclusions_formelles"
+    ],
+    "gap": null,
+    "notes": "Interprétariat/traduction prestation opérationnelle"
+  },
+  {
+    "id": "eval_012",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Collecte valorisation déchets végétaux Centrale achats",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-10929",
+    "raison_ia": "secteur pertinent, pas transformation",
+    "bzs": "Secteur non pertinent",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "clear_reject",
+    "policy_expected": [
+      "pol_exclusions_formelles"
+    ],
+    "gap": null,
+    "notes": "Collecte déchets exploitation opérationnelle. IA dit secteur pertinent Veolia faux positif"
+  },
+  {
+    "id": "eval_013",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Convention complémentaire santé agents CDG 51 collectivités",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-9486",
+    "raison_ia": "secteur pertinent, pas transformation",
+    "bzs": "Secteur non pertinent",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_secteur_assurance"
+    ],
+    "gap": null,
+    "notes": "Complémentaire santé agents collectivité = convention RH pas secteur assurance stratégique. Pattern récurrent"
+  },
+  {
+    "id": "eval_014",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Notation financière Sytral Mobilités programme EMTN agence notation",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-11025",
+    "raison_ia": "secteur prioritaire, pas transformation, pas expertise",
+    "bzs": "Secteur pertinent mais AO ne correspond pas",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": true,
+    "category": "borderline",
+    "policy_expected": [
+      "pol_exclusions_formelles",
+      "pol_clients_historiques_regle"
+    ],
+    "gap": null,
+    "notes": "Sytral prospect actif. Notation financière=exclusion formelle audit financier. IA correct bien raisonné"
+  },
+  {
+    "id": "eval_015",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Prestations coaching managers Sytral Mobilités",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-10692",
+    "raison_ia": "secteur prioritaire, pas transformation claire",
+    "bzs": "Bonne analyse de loutil",
+    "decision_expected": "REJECT",
+    "priority_expected": "basse",
+    "ia_correct": true,
+    "ia_reason_correct": true,
+    "category": "borderline",
+    "policy_expected": [
+      "pol_missions_conditionnelles",
+      "pol_clients_historiques_regle"
+    ],
+    "gap": null,
+    "notes": "Coaching managers Sytral prospect. Basse priorité justifiée. IA correct"
+  },
+  {
+    "id": "eval_016",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Fourniture remplacement réparation vitrages véhicules RRTP Occitanie",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-10514",
+    "raison_ia": "secteur prioritaire, pas transformation",
+    "bzs": "Secteur pertinent mais AO ne correspond pas",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": true,
+    "category": "clear_reject",
+    "policy_expected": [
+      "pol_exclusions_formelles"
+    ],
+    "gap": null,
+    "notes": "Fourniture matérielle exclusion formelle"
+  },
+  {
+    "id": "eval_017",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Traitement arriéré archives Direction générale Mobilités Bordeaux Métropole",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-9222",
+    "raison_ia": "secteur prioritaire, pas transformation",
+    "bzs": "Secteur pertinent mais AO ne correspond pas",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": true,
+    "category": "clear_reject",
+    "policy_expected": [
+      "pol_exclusions_formelles"
+    ],
+    "gap": null,
+    "notes": "Gestion documentaire archivage exclusion formelle PMO administratif"
+  },
+  {
+    "id": "eval_018",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "COLLECTE TRAITEMENT DECHETS COLLEGES",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-10903",
+    "raison_ia": "service public, pas transformation",
+    "bzs": "En effet le besoin nest pas le bon identifié",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": true,
+    "category": "clear_reject",
+    "policy_expected": [
+      "pol_exclusions_formelles"
+    ],
+    "gap": null,
+    "notes": "Collecte déchets exploitation opérationnelle"
+  },
+  {
+    "id": "eval_019",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Accompagnement promotion recherche partenaires culturels international expositions",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-9129",
+    "raison_ia": "secteur public, pas transformation",
+    "bzs": "Je ne sais pas pourquoi cet AO a passé les mots clés",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": true,
+    "category": "keyword_miss",
+    "policy_expected": [
+      "pol_secteur_public"
+    ],
+    "gap": "Problème keyword layer. Culture/international hors scope.",
+    "notes": "Faux positif keyword layer. Secteur culturel international hors scope"
+  },
+  {
+    "id": "eval_020",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "AMO Revision Plan Climat Air Energie Territorial PCAET 2027-2030",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-10283",
+    "raison_ia": "AO pertinent secteur cible besoin transformation",
+    "bzs": "Pas dans le secteur cible ici energie=secteur public pas acteur énergétique",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": false,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_secteur_energie"
+    ],
+    "gap": "pol_secteur_energie doit préciser collectivités PCAET hors scope — pas acteur énergétique",
+    "notes": "IA FAIL dit PASS. Mot énergie dans AO collectivité PCAET != acteur énergétique EDF Engie. Faux positif critique"
+  },
+  {
+    "id": "eval_021",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Délégation service public exploitation lignes transport routier voyageurs réseau régional",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-8248",
+    "raison_ia": "pertinent secteur mobilité implique transformation",
+    "bzs": "Secteur non prioritaire AO destiné aux opérateurs transport qui sont nos clients",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": false,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_secteur_mobilite",
+      "pol_disambiguation_mobilite_exclusions"
+    ],
+    "gap": "Gap critique: DSP transport=AO pour opérateurs exploitants. Balthazar est consultant POUR ces opérateurs pas opérateur soumissionnaire.",
+    "notes": "IA FAIL dit PASS. DSP=marché exploitation, Balthazar côté conseil pas côté opérateur soumissionnaire"
+  },
+  {
+    "id": "eval_022",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Missions sécurité protection santé contrôle technique restructuration extension centre maintenance",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-10655",
+    "raison_ia": "pertinent secteur prioritaire besoin transformation manque détails",
+    "bzs": "Ok secteur mobilité mais pas besoin transformation",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": false,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_exclusions_formelles"
+    ],
+    "gap": null,
+    "notes": "IA FAIL dit PASS. Restructuration+centre maintenance=travaux/MOE pas transformation stratégique. Mot transformation piège"
+  },
+  {
+    "id": "eval_023",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Nomination commissaire aux comptes Tisséo Ingénierie article L821-40",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-10728",
+    "raison_ia": "score keywords insuffisant",
+    "bzs": "AO pour Tisséo Ingénierie client de BZS",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": true,
+    "category": "client_historique",
+    "policy_expected": [
+      "pol_exclusions_formelles",
+      "pol_clients_historiques_regle"
+    ],
+    "gap": null,
+    "notes": "Client historique Tisséo mais nomination CAC=audit/juridique exclusion formelle absolue. Correct de rejeter"
+  },
+  {
+    "id": "eval_024",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Transport bus lycéens Salon Orientation Formation Métiers Guadeloupe",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-11943",
+    "raison_ia": "score keywords insuffisant",
+    "bzs": "Pourquoi autres AO transports remontent pas celui-ci",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": null,
+    "category": "keyword_miss",
+    "policy_expected": [
+      "pol_disambiguation_mobilite_exclusions"
+    ],
+    "gap": "Problème keyword layer cohérence. REJECT correct au fond.",
+    "notes": "Transport ponctuel événementiel REJECT correct fond. Incohérence keyword layer."
+  },
+  {
+    "id": "eval_025",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Gestion transports marchandises dangereuses conseil transport",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-9780",
+    "raison_ia": "score keywords insuffisant",
+    "bzs": "Pourquoi autres AO transports remontent pas celui-ci",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": null,
+    "category": "keyword_miss",
+    "policy_expected": [
+      "pol_disambiguation_mobilite_exclusions"
+    ],
+    "gap": "Keyword layer cohérence.",
+    "notes": "Transport marchandises dangereuses opérationnel. REJECT correct"
+  },
+  {
+    "id": "eval_026",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Mise En Coherence Strategique Et Operationnelle De La Politique De Lhabitat",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-9411",
+    "raison_ia": "score keywords insuffisant",
+    "bzs": "Deux mots clés importants stratégique et opérationnelle",
+    "decision_expected": "REJECT",
+    "priority_expected": "basse",
+    "ia_correct": false,
+    "ia_reason_correct": null,
+    "category": "keyword_miss",
+    "policy_expected": [
+      "pol_secteur_public"
+    ],
+    "gap": "Keyword miss: stratégique+opérationnelle auraient dû passer. Fond REJECT: habitat hors secteurs cibles. Même pb que PAT.",
+    "notes": "Mots-clés forts mais fond hors scope habitat. Bon mot-clé mauvais sujet"
+  },
+  {
+    "id": "eval_027",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Transport délégations étrangères salons armement français 2026-2029",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-8436",
+    "raison_ia": "score keywords insuffisant",
+    "bzs": "Pourquoi autres AO transports remontent pas celui-ci",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": null,
+    "category": "keyword_miss",
+    "policy_expected": [
+      "pol_disambiguation_mobilite_exclusions"
+    ],
+    "gap": "Keyword layer cohérence.",
+    "notes": "Transport événementiel armement hors scope"
+  },
+  {
+    "id": "eval_028",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "TRANSPORT ELEVES PERSONNES ACTIVITES SCOLAIRES EXTRA-SCOLAIRES",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-11011",
+    "raison_ia": "score keywords insuffisant",
+    "bzs": "Pourquoi autres AO transports remontent pas celui-ci",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": null,
+    "category": "keyword_miss",
+    "policy_expected": [
+      "pol_disambiguation_mobilite_exclusions"
+    ],
+    "gap": "Keyword layer cohérence.",
+    "notes": "Transport scolaire hors scope. Incohérence keyword layer"
+  },
+  {
+    "id": "eval_029",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Prestations conseils organisation accompagnement au changement phase Candidature",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-9002",
+    "raison_ia": "score keywords insuffisant",
+    "bzs": "AO sur lequel GO fait: conseil organisation accompagnement changement mots clés doivent remonter",
+    "decision_expected": "PASS",
+    "priority_expected": "moyenne",
+    "ia_correct": false,
+    "ia_reason_correct": null,
+    "category": "keyword_miss",
+    "policy_expected": [
+      "pol_missions_coeur",
+      "pol_priorite_haute"
+    ],
+    "gap": "Keyword miss critique: conseil organisation + accompagnement changement = cœur métier Balthazar. GO confirmé BZS.",
+    "notes": "PASS manqué. Conseil org + conduite changement = missions cœur. GO confirmé."
+  },
+  {
+    "id": "eval_030",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Mission réflexion prospective stratégique accompagnement projet territoire Vision avenir 2040 Saint-Louis Agglomération",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-11338",
+    "raison_ia": "score keywords insuffisant",
+    "bzs": "Cet AO devrait passer les mots clés: prospective, stratégique, accompagnement",
+    "decision_expected": "PASS",
+    "priority_expected": "moyenne",
+    "ia_correct": false,
+    "ia_reason_correct": null,
+    "category": "keyword_miss",
+    "policy_expected": [
+      "pol_missions_conditionnelles",
+      "pol_secteur_public"
+    ],
+    "gap": "Keyword miss: prospective+stratégique = acceptable conditionnel. Collectivité secteur public mandat stratégique.",
+    "notes": "PASS manqué. Prospective stratégique territoriale = mission conditionnelle acceptable. GO confirmé."
+  },
+  {
+    "id": "eval_031",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Définition et déploiement stratégie marketing et influence",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-10952",
+    "raison_ia": "score keywords insuffisant",
+    "bzs": "Avec mot stratégie cet AO devrait passer les mots clés non",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": null,
+    "category": "keyword_miss",
+    "policy_expected": [
+      "pol_missions_coeur"
+    ],
+    "gap": "Keyword: stratégie seul ne doit pas suffire. Stratégie marketing != stratégie entreprise. Faux ami fort.",
+    "notes": "REJECT correct fond. BZS questionne keyword layer. Stratégie marketing hors scope."
+  },
+  {
+    "id": "eval_032",
+    "sheet": "Veille AO 2201-0302",
+    "ao": "Accompagnement stratégique gestion relations presse France",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-9721",
+    "raison_ia": "score keywords insuffisant",
+    "bzs": "Stratégique nest-il pas un mot clé",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": null,
+    "category": "keyword_miss",
+    "policy_expected": [
+      "pol_missions_coeur"
+    ],
+    "gap": "Même pb: stratégique+relations presse != stratégie entreprise.",
+    "notes": "REJECT correct. Relations presse/communication hors scope. BZS questionne keyword."
+  },
+  {
+    "id": "eval_033",
+    "sheet": "Veille AO 0502",
+    "ao": "Maintenance centrales photovoltaïques Conseil départemental Tarn",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-12096",
+    "raison_ia": "secteur pertinent, pas transformation",
+    "bzs": "Secteur non pertinent",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_secteur_energie"
+    ],
+    "gap": "pol_secteur_energie doit préciser maintenance technique infra énergétique = exclusion même secteur énergie pertinent",
+    "notes": "Photovoltaïque déclenche faux positif énergie. Maintenance technique = exclusion"
+  },
+  {
+    "id": "eval_034",
+    "sheet": "Veille AO 0502",
+    "ao": "Reconditionnement vélos batteries vélos SAD",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-11441",
+    "raison_ia": "secteur prioritaire expertises pertinentes, pas transformation",
+    "bzs": "Secteur non pertinent",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_secteur_mobilite",
+      "pol_exclusions_formelles"
+    ],
+    "gap": null,
+    "notes": "Vélos/batteries = fourniture matérielle mobilité douce. IA dit secteur prioritaire et expertises pertinentes à tort"
+  },
+  {
+    "id": "eval_035",
+    "sheet": "Veille AO 0502",
+    "ao": "Transformation culturelle utilisation nouveaux espaces CARSAT Centre Ouest",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-12243",
+    "raison_ia": "score keywords insuffisant",
+    "bzs": "Ancien client + AO pertinent cet AO devrait etre pertinent et un GO",
+    "decision_expected": "PASS",
+    "priority_expected": "haute",
+    "ia_correct": false,
+    "ia_reason_correct": null,
+    "category": "client_historique",
+    "policy_expected": [
+      "pol_clients_historiques_regle",
+      "pol_missions_coeur"
+    ],
+    "gap": "Double miss: keyword rate transformation culturelle ET client historique CARSAT Centre Ouest non détecté.",
+    "notes": "PASS manqué critique. Client historique + transformation culturelle = cœur Balthazar. GO confirmé."
+  },
+  {
+    "id": "eval_036",
+    "sheet": "Veille AO 0502",
+    "ao": "AUDIT ORGANISATIONNEL ANALYSE RISQUES PSYCHOSOCIAUX BIBLIOTHEQUES METZ BMM",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-12384",
+    "raison_ia": "score keywords insuffisant",
+    "bzs": "Analyse de risque mot clé qui devrait passer premier screening",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": null,
+    "category": "keyword_miss",
+    "policy_expected": [
+      "pol_exclusions_formelles"
+    ],
+    "gap": "Audit organisationnel+RPS != transformation stratégique. Keyword audit organisationnel ne doit pas faire passer.",
+    "notes": "REJECT correct fond. Audit RPS expertise RH spécialisée hors scope. BZS questionne keyword."
+  },
+  {
+    "id": "eval_037",
+    "sheet": "Veille AO 0602",
+    "ao": "Appui méthodologique logistique stratégique animation Conseils Territoriaux Santé région AURA",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-12215",
+    "raison_ia": "pertinent secteur public besoin stratégique",
+    "bzs": "Ok faible priorité passage screening mot clé mais justification mauvaise",
+    "decision_expected": "REJECT",
+    "priority_expected": "basse",
+    "ia_correct": "partial",
+    "ia_reason_correct": false,
+    "category": "borderline",
+    "policy_expected": [
+      "pol_secteur_public"
+    ],
+    "gap": "pol_secteur_public: santé territoriale CTS hors secteur prioritaire même émetteur public avec mot stratégique. Sujet santé pas dans secteurs cibles.",
+    "notes": "IA dit PASS faible priorité mais raison fausse. Santé territoriale hors secteurs cibles."
+  },
+  {
+    "id": "eval_038",
+    "sheet": "Veille AO 0902",
+    "ao": "Exploitation service transport demande personnes handicap moteur visuel",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-13517",
+    "raison_ia": "secteur pertinent, pas transformation",
+    "bzs": "Secteur non pertinent",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_disambiguation_mobilite_exclusions"
+    ],
+    "gap": null,
+    "notes": "Transport à la demande PMR = exploitation service opérationnel. IA dit secteur pertinent à tort"
+  },
+  {
+    "id": "eval_039",
+    "sheet": "Veille AO 0902",
+    "ao": "Accompagnement stratégique opérationnel Projet alimentaire territorial PAT 2025-2028",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-13116",
+    "raison_ia": "pertinent besoin transformation secteur public expertises alignées",
+    "bzs": "Passage mots clés ok mais mauvaise analyse: fond du sujet ne correspond pas",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": false,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_secteur_public"
+    ],
+    "gap": "Gap structurel majeur: secteur public + mots-clés stratégiques insuffisant. SUJET alimentaire hors secteurs cibles. pol_secteur_public doit lister thématiques hors scope.",
+    "notes": "IA FAIL critique. PAT alimentaire = politique publique hors secteurs cibles. Bon émetteur mauvais sujet."
+  },
+  {
+    "id": "eval_040",
+    "sheet": "Veille AO 0902",
+    "ao": "Intervention psychologue embauche assistants familiaux agrément accueillants familiaux",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-13351",
+    "raison_ia": "secteur public pertinent, pas transformation",
+    "bzs": "Secteur non pertinent",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "clear_reject",
+    "policy_expected": [
+      "pol_secteur_public"
+    ],
+    "gap": null,
+    "notes": "Psychologue embauche = prestation RH spécialisée. IA dit secteur public pertinent à tort"
+  },
+  {
+    "id": "eval_041",
+    "sheet": "Veille AO 1002",
+    "ao": "Production animation diffusion contenus communication territoriale stratégie contenu 12 mois",
+    "url": "https://www.boamp.fr/pages/avis/?q=idweb:26-13811",
+    "raison_ia": "secteur pertinent, pas transformation",
+    "bzs": "Secteur non pertinent besoin non correspondant",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_missions_coeur"
+    ],
+    "gap": null,
+    "notes": "Stratégie de contenu déclenche faux positif. Communication/contenu != stratégie entreprise"
+  },
+  {
+    "id": "eval_042",
+    "sheet": "Veille AO 1102",
+    "ao": "Accord-cadre exécution services transport scolaire",
+    "url": "https://www.marchesonline.com/appels-offres/avis/accord-cadre-relatif-a-l-execution-de-services-de-tra/ao-9558297-1",
+    "raison_ia": "secteur cible, pas transformation",
+    "bzs": "Non secteur pas cible",
+    "decision_expected": "REJECT",
+    "priority_expected": "non_pertinent",
+    "ia_correct": true,
+    "ia_reason_correct": false,
+    "category": "terminological_trap",
+    "policy_expected": [
+      "pol_disambiguation_mobilite_exclusions"
+    ],
+    "gap": null,
+    "notes": "Transport scolaire. IA dit secteur cible à tort encore."
+  }
+]

@@ -1,0 +1,541 @@
+{
+  "_meta": {
+    "description": "Structured client table for deterministic + fuzzy matching in the RAG client lookup tool",
+    "version": "1.0.0",
+    "last_updated": "2026-03-03",
+    "usage": "Used by clientHistoryLookupTool to detect historical clients. Match by nom_normalise or aliases[]. Matching is case-insensitive, accent-normalized."
+  },
+  "clients": [
+    {
+      "nom_normalise": "ratp",
+      "aliases": ["régie autonome des transports parisiens", "ratp group", "groupe ratp"],
+      "secteur": "mobilite",
+      "type_org": "EPIC",
+      "region": "Île-de-France",
+      "statut": "historical",
+      "tags": ["transport_public", "metro", "bus", "tramway", "IDF"]
+    },
+    {
+      "nom_normalise": "ratp_solutions_ville",
+      "aliases": ["ratp solutions ville", "ratp solutions villes"],
+      "secteur": "mobilite",
+      "type_org": "filiale_operateur_transport",
+      "region": "Île-de-France",
+      "statut": "historical",
+      "tags": ["DSP", "transport_public", "groupement"]
+    },
+    {
+      "nom_normalise": "ratp_smart_systems",
+      "aliases": ["ratp smart systems"],
+      "secteur": "mobilite",
+      "type_org": "filiale_operateur_transport",
+      "region": "Île-de-France",
+      "statut": "historical",
+      "tags": ["mobilite_digitale", "MaaS"]
+    },
+    {
+      "nom_normalise": "ratp_developpement",
+      "aliases": ["ratp développement", "ratp developpement"],
+      "secteur": "mobilite",
+      "type_org": "filiale_operateur_transport",
+      "region": null,
+      "statut": "historical",
+      "tags": ["international", "transport_public"]
+    },
+    {
+      "nom_normalise": "sncf",
+      "aliases": ["sncf sa", "groupe sncf", "société nationale des chemins de fer"],
+      "secteur": "mobilite",
+      "type_org": "EPIC",
+      "region": null,
+      "statut": "historical",
+      "tags": ["ferroviaire", "transport_national"]
+    },
+    {
+      "nom_normalise": "sncf_voyageurs",
+      "aliases": ["sncf voyageurs", "sncf-voyageurs"],
+      "secteur": "mobilite",
+      "type_org": "filiale_operateur_ferroviaire",
+      "region": null,
+      "statut": "historical",
+      "tags": ["ferroviaire", "voyageurs"]
+    },
+    {
+      "nom_normalise": "sncf_reseau",
+      "aliases": ["sncf réseau", "sncf reseau", "sncf-réseau"],
+      "secteur": "mobilite",
+      "type_org": "filiale_gestionnaire_infrastructure",
+      "region": null,
+      "statut": "historical",
+      "tags": ["ferroviaire", "infrastructure", "reseau"]
+    },
+    {
+      "nom_normalise": "fret_sncf",
+      "aliases": ["sncf fret", "fret sncf", "sncf-fret"],
+      "secteur": "mobilite",
+      "type_org": "filiale_operateur_ferroviaire",
+      "region": null,
+      "statut": "historical",
+      "tags": ["fret", "ferroviaire"]
+    },
+    {
+      "nom_normalise": "sncf_gares_connexions",
+      "aliases": ["sncf gares et connexions", "gares et connexions"],
+      "secteur": "mobilite",
+      "type_org": "filiale_operateur_ferroviaire",
+      "region": null,
+      "statut": "historical",
+      "tags": ["gares", "retail_transport"]
+    },
+    {
+      "nom_normalise": "atmb",
+      "aliases": ["autoroutes et tunnel du mont blanc", "autoroutes et tunnels du mont-blanc", "autoroutes et tunnels du mont blanc"],
+      "secteur": "mobilite",
+      "type_org": "concessionnaire",
+      "region": "Auvergne-Rhône-Alpes",
+      "statut": "historical",
+      "tags": ["autoroute", "tunnel", "concession", "infrastructure"]
+    },
+    {
+      "nom_normalise": "tisseo",
+      "aliases": ["tisseo", "tisséo", "tisseeo"],
+      "secteur": "mobilite",
+      "type_org": "AOM",
+      "region": "Occitanie",
+      "statut": "historical",
+      "tags": ["transport_public_urbain", "AOM", "Toulouse"]
+    },
+    {
+      "nom_normalise": "tisseo_ingenierie",
+      "aliases": ["tisséo ingénierie", "tisseo ingenierie", "tisséo ingenierie"],
+      "secteur": "mobilite",
+      "type_org": "SPL",
+      "region": "Occitanie",
+      "statut": "historical",
+      "tags": ["SPL", "maitrise_ouvrage", "infrastructure_transport", "Toulouse"]
+    },
+    {
+      "nom_normalise": "tisseo_voyageurs",
+      "aliases": ["tisséo voyageurs", "tisseo voyageurs"],
+      "secteur": "mobilite",
+      "type_org": "operateur_transport",
+      "region": "Occitanie",
+      "statut": "historical",
+      "tags": ["transport_public_urbain", "Toulouse"]
+    },
+    {
+      "nom_normalise": "tisseo_collectivite",
+      "aliases": ["tisséo collectivités", "tisseo collectivite", "tisséo collectivité"],
+      "secteur": "mobilite",
+      "type_org": "AOM",
+      "region": "Occitanie",
+      "statut": "historical",
+      "tags": ["AOM", "Toulouse"]
+    },
+    {
+      "nom_normalise": "idfm",
+      "aliases": ["île-de-france mobilités", "ile-de-france mobilites", "idف", "idfm"],
+      "secteur": "mobilite",
+      "type_org": "AOM",
+      "region": "Île-de-France",
+      "statut": "historical",
+      "tags": ["AOM", "IDF", "transport_public"]
+    },
+    {
+      "nom_normalise": "transdev",
+      "aliases": ["transdev france", "transdev group", "transdev groupe"],
+      "secteur": "mobilite",
+      "type_org": "operateur_transport_multimodal",
+      "region": null,
+      "statut": "historical",
+      "tags": ["transport_public", "DSP", "international"]
+    },
+    {
+      "nom_normalise": "keolis",
+      "aliases": ["kéolis", "keolis"],
+      "secteur": "mobilite",
+      "type_org": "operateur_transport_multimodal",
+      "region": null,
+      "statut": "historical",
+      "tags": ["transport_public", "DSP"]
+    },
+    {
+      "nom_normalise": "getlink",
+      "aliases": ["getlink", "eurotunnel", "groupe eurotunnel", "get link"],
+      "secteur": "mobilite",
+      "type_org": "operateur_infrastructure_transport",
+      "region": null,
+      "statut": "historical",
+      "tags": ["tunnel_sous_manche", "logistique_internationale", "infrastructure"]
+    },
+    {
+      "nom_normalise": "ouigo",
+      "aliases": ["ouigo", "ouigo france"],
+      "secteur": "mobilite",
+      "type_org": "filiale_operateur_ferroviaire",
+      "region": null,
+      "statut": "historical",
+      "tags": ["ferroviaire", "low_cost", "voyageurs"]
+    },
+    {
+      "nom_normalise": "ouigo_espana",
+      "aliases": ["ouigo españa", "ouigo espana", "ouigo spain"],
+      "secteur": "mobilite",
+      "type_org": "filiale_operateur_ferroviaire",
+      "region": "Espagne",
+      "statut": "historical",
+      "tags": ["ferroviaire", "low_cost", "espagne"]
+    },
+    {
+      "nom_normalise": "eurostar",
+      "aliases": ["eurostar", "eurostar international"],
+      "secteur": "mobilite",
+      "type_org": "operateur_ferroviaire_international",
+      "region": null,
+      "statut": "historical",
+      "tags": ["ferroviaire", "international"]
+    },
+    {
+      "nom_normalise": "ter",
+      "aliases": ["ter", "transport express régional"],
+      "secteur": "mobilite",
+      "type_org": "marque_sncf",
+      "region": null,
+      "statut": "historical",
+      "tags": ["ferroviaire", "regional"]
+    },
+    {
+      "nom_normalise": "kisio",
+      "aliases": ["kisio", "kisio digital"],
+      "secteur": "mobilite",
+      "type_org": "filiale_numerique_transport",
+      "region": null,
+      "statut": "historical",
+      "tags": ["mobilite_digitale", "MaaS"]
+    },
+    {
+      "nom_normalise": "lagardere_travel_retail",
+      "aliases": ["lagardère travel retail", "lagardere travel retail", "lagardère TR"],
+      "secteur": "mobilite",
+      "type_org": "retail_transport",
+      "region": null,
+      "statut": "historical",
+      "tags": ["retail", "gares", "aeroports"]
+    },
+    {
+      "nom_normalise": "air_france",
+      "aliases": ["air france", "air france-klm"],
+      "secteur": "mobilite",
+      "type_org": "operateur_aerien",
+      "region": "Île-de-France",
+      "statut": "historical",
+      "tags": ["aérien", "transport"]
+    },
+    {
+      "nom_normalise": "aeroports_de_paris",
+      "aliases": ["aéroports de paris", "aeroports de paris", "ADP", "groupe adp"],
+      "secteur": "mobilite",
+      "type_org": "gestionnaire_infrastructure",
+      "region": "Île-de-France",
+      "statut": "historical",
+      "tags": ["aéroport", "infrastructure"]
+    },
+    {
+      "nom_normalise": "europcar",
+      "aliases": ["europcar", "europcar mobility group"],
+      "secteur": "mobilite",
+      "type_org": "operateur_mobilite",
+      "region": null,
+      "statut": "historical",
+      "tags": ["location_vehicule", "mobilite"]
+    },
+    {
+      "nom_normalise": "cfl",
+      "aliases": ["cfl", "chemins de fer luxembourgeois"],
+      "secteur": "mobilite",
+      "type_org": "operateur_ferroviaire",
+      "region": "Luxembourg",
+      "statut": "historical",
+      "tags": ["ferroviaire", "international"]
+    },
+    {
+      "nom_normalise": "maif",
+      "aliases": ["maif", "mutuelle assurance des instituteurs de france"],
+      "secteur": "assurance",
+      "type_org": "mutuelle",
+      "region": null,
+      "statut": "historical",
+      "tags": ["assurance", "mutuelle", "societe_a_mission", "raison_etre"]
+    },
+    {
+      "nom_normalise": "groupama",
+      "aliases": ["groupama", "groupe groupama"],
+      "secteur": "assurance",
+      "type_org": "mutuelle",
+      "region": null,
+      "statut": "historical",
+      "tags": ["assurance", "mutuelle"]
+    },
+    {
+      "nom_normalise": "groupama_immobilier",
+      "aliases": ["groupama immobilier"],
+      "secteur": "assurance",
+      "type_org": "filiale_assurance",
+      "region": null,
+      "statut": "historical",
+      "tags": ["assurance", "immobilier"]
+    },
+    {
+      "nom_normalise": "ggvie",
+      "aliases": ["ggvie", "groupama ggvie"],
+      "secteur": "assurance",
+      "type_org": "filiale_assurance",
+      "region": null,
+      "statut": "historical",
+      "tags": ["assurance_vie", "assurance"]
+    },
+    {
+      "nom_normalise": "covea",
+      "aliases": ["covéa", "covea"],
+      "secteur": "assurance",
+      "type_org": "groupe_assurance",
+      "region": null,
+      "statut": "historical",
+      "tags": ["assurance", "MMA", "MAAF", "GMF"]
+    },
+    {
+      "nom_normalise": "gan_assurances",
+      "aliases": ["gan assurances", "gan", "groupama gan"],
+      "secteur": "assurance",
+      "type_org": "compagnie_assurance",
+      "region": null,
+      "statut": "historical",
+      "tags": ["assurance"]
+    },
+    {
+      "nom_normalise": "ag2r_la_mondiale",
+      "aliases": ["ag2r la mondiale", "ag2r lamondiale", "ag2r", "la mondiale"],
+      "secteur": "assurance",
+      "type_org": "groupe_protection_sociale",
+      "region": null,
+      "statut": "historical",
+      "tags": ["protection_sociale", "retraite", "prevoyance", "assurance"]
+    },
+    {
+      "nom_normalise": "abeille_assurances",
+      "aliases": ["abeille", "abeille assurances", "aviva france"],
+      "secteur": "assurance",
+      "type_org": "compagnie_assurance",
+      "region": null,
+      "statut": "historical",
+      "tags": ["assurance"]
+    },
+    {
+      "nom_normalise": "allianz",
+      "aliases": ["allianz", "allianz france"],
+      "secteur": "assurance",
+      "type_org": "compagnie_assurance",
+      "region": null,
+      "statut": "historical",
+      "tags": ["assurance"]
+    },
+    {
+      "nom_normalise": "axa",
+      "aliases": ["axa", "axa france", "groupe axa"],
+      "secteur": "assurance",
+      "type_org": "compagnie_assurance",
+      "region": null,
+      "statut": "historical",
+      "tags": ["assurance"]
+    },
+    {
+      "nom_normalise": "mgen",
+      "aliases": ["mgen", "mutuelle générale de l'éducation nationale"],
+      "secteur": "assurance",
+      "type_org": "mutuelle",
+      "region": null,
+      "statut": "historical",
+      "tags": ["mutuelle", "protection_sociale"]
+    },
+    {
+      "nom_normalise": "macif",
+      "aliases": ["macif", "mutuelle assurance des commerçants et industriels de france"],
+      "secteur": "assurance",
+      "type_org": "mutuelle",
+      "region": null,
+      "statut": "historical",
+      "tags": ["mutuelle", "assurance"]
+    },
+    {
+      "nom_normalise": "april",
+      "aliases": ["april", "april group"],
+      "secteur": "assurance",
+      "type_org": "courtier_assurance",
+      "region": null,
+      "statut": "historical",
+      "tags": ["assurance", "courtage"]
+    },
+    {
+      "nom_normalise": "apicil",
+      "aliases": ["apicil", "groupe apicil"],
+      "secteur": "assurance",
+      "type_org": "groupe_protection_sociale",
+      "region": "Auvergne-Rhône-Alpes",
+      "statut": "historical",
+      "tags": ["protection_sociale", "prevoyance", "retraite"]
+    },
+    {
+      "nom_normalise": "relyens",
+      "aliases": ["relyens", "groupama gan euro assurances"],
+      "secteur": "assurance",
+      "type_org": "compagnie_assurance",
+      "region": null,
+      "statut": "historical",
+      "tags": ["assurance", "secteur_public", "mutuelles_professionnelles"]
+    },
+    {
+      "nom_normalise": "malakoff_humanis",
+      "aliases": ["malakoff humanis", "malakoff médéric humanis"],
+      "secteur": "assurance",
+      "type_org": "groupe_protection_sociale",
+      "region": null,
+      "statut": "historical",
+      "tags": ["protection_sociale", "prevoyance", "retraite"]
+    },
+    {
+      "nom_normalise": "carsat",
+      "aliases": ["carsat", "caisse d'assurance retraite et de la santé au travail"],
+      "secteur": "assurance",
+      "type_org": "organisme_securite_sociale",
+      "region": null,
+      "statut": "historical",
+      "tags": ["protection_sociale", "retraite", "sante_travail", "securite_sociale"]
+    },
+    {
+      "nom_normalise": "carsat_normandie",
+      "aliases": ["carsat normandie"],
+      "secteur": "assurance",
+      "type_org": "organisme_securite_sociale",
+      "region": "Normandie",
+      "statut": "historical",
+      "tags": ["protection_sociale", "retraite", "securite_sociale", "raison_etre"]
+    },
+    {
+      "nom_normalise": "carsat_centre_ouest",
+      "aliases": ["carsat centre ouest", "carsat centre-ouest"],
+      "secteur": "assurance",
+      "type_org": "organisme_securite_sociale",
+      "region": "Nouvelle-Aquitaine",
+      "statut": "historical",
+      "tags": ["protection_sociale", "retraite", "securite_sociale"]
+    },
+    {
+      "nom_normalise": "edf",
+      "aliases": ["edf", "électricité de france", "electricite de france"],
+      "secteur": "energie",
+      "type_org": "operateur_energie",
+      "region": null,
+      "statut": "historical",
+      "tags": ["electricite", "nucleaire", "renouvelable"]
+    },
+    {
+      "nom_normalise": "engie",
+      "aliases": ["engie", "gdf suez"],
+      "secteur": "energie",
+      "type_org": "operateur_energie",
+      "region": null,
+      "statut": "historical",
+      "tags": ["gaz", "electricite", "renouvelable", "transition_energetique"]
+    },
+    {
+      "nom_normalise": "grt_gaz",
+      "aliases": ["grt gaz", "grtgaz"],
+      "secteur": "energie",
+      "type_org": "gestionnaire_reseau_transport",
+      "region": null,
+      "statut": "historical",
+      "tags": ["gaz", "reseau_transport", "infrastructure_regulee"]
+    },
+    {
+      "nom_normalise": "grdf",
+      "aliases": ["grdf", "gaz réseau distribution france"],
+      "secteur": "energie",
+      "type_org": "gestionnaire_reseau_distribution",
+      "region": null,
+      "statut": "historical",
+      "tags": ["gaz", "reseau_distribution", "infrastructure_regulee"]
+    },
+    {
+      "nom_normalise": "cnr",
+      "aliases": ["cnr", "compagnie nationale du rhône"],
+      "secteur": "energie",
+      "type_org": "concessionnaire_hydraulique",
+      "region": "Auvergne-Rhône-Alpes",
+      "statut": "historical",
+      "tags": ["hydraulique", "renouvelable", "concession", "voies_navigables"]
+    },
+    {
+      "nom_normalise": "enedis",
+      "aliases": ["enedis", "electricite reseau distribution france", "erdf"],
+      "secteur": "energie",
+      "type_org": "gestionnaire_reseau_distribution",
+      "region": null,
+      "statut": "historical",
+      "tags": ["electricite", "reseau_distribution", "infrastructure_regulee"]
+    },
+    {
+      "nom_normalise": "veolia",
+      "aliases": ["veolia", "veolia environnement"],
+      "secteur": "energie",
+      "type_org": "operateur_services_environnement",
+      "region": null,
+      "statut": "historical",
+      "tags": ["eau", "dechets", "energie", "services_urbains"]
+    },
+    {
+      "nom_normalise": "rte",
+      "aliases": ["rte", "réseau de transport d'électricité", "reseau de transport d'electricite"],
+      "secteur": "energie",
+      "type_org": "gestionnaire_reseau_transport",
+      "region": null,
+      "statut": "historical",
+      "tags": ["electricite", "reseau_transport", "infrastructure_regulee"]
+    },
+    {
+      "nom_normalise": "antargaz",
+      "aliases": ["antargaz"],
+      "secteur": "energie",
+      "type_org": "operateur_energie",
+      "region": null,
+      "statut": "historical",
+      "tags": ["gaz", "propane", "energie"]
+    },
+    {
+      "nom_normalise": "schneider_electric",
+      "aliases": ["schneider electric", "schneider"],
+      "secteur": "energie",
+      "type_org": "industriel",
+      "region": null,
+      "statut": "historical",
+      "tags": ["efficacite_energetique", "smart_grid", "electricite"]
+    },
+    {
+      "nom_normalise": "jc_decaux",
+      "aliases": ["jc decaux", "jcdecaux", "jean-claude decaux"],
+      "secteur": "mobilite",
+      "type_org": "operateur_mobilier_urbain",
+      "region": null,
+      "statut": "prospect",
+      "tags": ["affichage", "mobilier_urbain", "mobilite", "smart_city"]
+    },
+    {
+      "nom_normalise": "sytral_mobilites",
+      "aliases": ["sytral mobilités", "sytral mobilites", "sytral", "tcl lyon", "syndicat mixte des transports en commun lyonnais"],
+      "secteur": "mobilite",
+      "type_org": "AOM",
+      "region": "Auvergne-Rhône-Alpes",
+      "statut": "prospect",
+      "tags": ["AOM", "Lyon", "transport_public", "TCL"]
+    }
+  ]
+}

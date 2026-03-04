@@ -9,7 +9,7 @@
 Balthazar est un système de veille automatisé basé sur l'architecture **Mastra** qui :
 - ✅ **Récupère** quotidiennement les appels d'offres du BOAMP et MarchesOnline
 - ✅ **Filtre** intelligemment selon des critères structurels (API) et métier (IA)
-- ✅ **Analyse** la pertinence et la faisabilité via des **agents IA spécialisés**
+- ✅ **Analyse** la pertinence et la faisabilité via un **agent IA RAG** (règles Balthazar + GPT-4o)
 - ✅ **Score** et priorise les opportunités (HIGH, MEDIUM, LOW)
 - ✅ **Sauvegarde** les résultats dans Supabase pour exploitation
 
@@ -81,7 +81,7 @@ sequenceDiagram
     Keyword-->>Workflow: Score keywords + signaux
     
     Workflow->>Agent: Analyse sémantique (IA)
-    Note over Agent: GPT-4o-mini<br/>Structured Output<br/>Few-shot Learning
+    Note over Agent: GPT-4o + RAG<br/>Structured Output<br/>Policies / Case studies
     Agent-->>Workflow: Score sémantique (0-10) + justification
     
     Workflow->>Workflow: Scoring final + priorité
@@ -95,14 +95,14 @@ sequenceDiagram
 
 ### boampSemanticAnalyzer
 
-**Agent spécialisé dans l'analyse sémantique des appels d'offres pour Balthazar Consulting.**
+**Agent spécialisé dans l'analyse sémantique des appels d'offres pour Balthazar Consulting.** Il s'appuie sur un **RAG** (base vectorielle de règles et case studies Balthazar) pour ancrer ses décisions dans les règles métier.
 
 #### Caractéristiques Techniques
 
 - **Framework** : `Agent` de Mastra (`@mastra/core`)
-- **Modèle LLM** : OpenAI GPT-4o-mini (optimisé coût/performance)
-- **Structured Output** : Schéma Zod garantissant un format de réponse structuré
-- **Few-shot Learning** : Exemples réels d'AO Balthazar pour améliorer la précision
+- **Modèle LLM** : OpenAI GPT-4o (qualification et structured output)
+- **RAG** : requêtes sur policies (exclusions, secteurs, désambiguïsation) et case studies ; lookup clients historiques
+- **Structured Output** : Schéma Zod (fit sectoriel, expertise, posture, decision_gate, recommandation, rag_sources)
 
 #### Architecture de l'Agent
 
@@ -111,9 +111,17 @@ sequenceDiagram
 export const boampSemanticAnalyzer = new Agent({
   name: 'boamp-semantic-analyzer',
   instructions: `Tu es un expert en qualification d'appels d'offres...`,
-  model: 'openai/gpt-4o-mini',
+  model: 'openai/gpt-4o',
+  tools: {
+    'balthazar-policies-query': balthazarPoliciesQueryTool,
+    'balthazar-case-studies-query': balthazarCaseStudiesQueryTool,
+    'client-history-lookup': clientHistoryLookupTool,
+    'ao-text-verification': aoTextVerificationTool,
+  },
 });
 ```
+
+Pour l'indexation du corpus RAG et le détail des outils, voir **[docs/RAG_ET_EVALS.md](./docs/RAG_ET_EVALS.md)**.
 
 #### Schéma de Sortie Structuré
 
@@ -296,10 +304,10 @@ graph LR
 - **Sortie** : Score 0-1 + signaux métier
 
 #### 6. semanticAnalysisStep ⭐
-- **Rôle** : Analyse sémantique via agent IA
-- **Agent utilisé** : `boampSemanticAnalyzer`
+- **Rôle** : Analyse sémantique via agent IA (RAG)
+- **Agent utilisé** : `boampSemanticAnalyzer` (GPT-4o + outils policies / case studies / clients historiques)
 - **Appel** : `analyzeSemanticRelevance(ao, keywordScore)`
-- **Sortie** : Score 0-10 + justification détaillée
+- **Sortie** : Score 0-10, decision_gate (PASS/REJECT), recommandation, justification, rag_sources
 
 #### 7. scoringStep
 - **Rôle** : Calcul score final et priorité
@@ -337,17 +345,17 @@ graph TD
 ### Niveau 1 : Keyword Matching (Gratuit)
 
 - **Fonction** : `calculateKeywordScore()` + `calculateEnhancedKeywordScore()`
-- **Lexique** : Secteurs cibles (×3), Expertises (×2), Red flags
+- **Lexique** : Secteurs cibles (×3), Expertises (×3), Posture (×3), Red flags
 - **Score** : 0-100 (converti en 0-1 pour compatibilité)
 - **Optimisation** : Décision `shouldSkipLLM()` pour éviter appels LLM inutiles
 
-### Niveau 2 : Semantic Analysis (Agent IA)
+### Niveau 2 : Semantic Analysis (Agent IA + RAG)
 
 - **Agent** : `boampSemanticAnalyzer`
-- **Modèle** : GPT-4o-mini
+- **Modèle** : GPT-4o (avec outils RAG : policies, case studies, clients historiques)
 - **Input** : AO + contexte keyword score
-- **Output** : Score 0-10 avec justification structurée
-- **Coût** : ~0.003€ par AO analysé
+- **Output** : Score 0-10, decision_gate (PASS/REJECT), recommandation, justification, rag_sources
+- **Coût** : ~0.01–0.02€ par AO analysé (GPT-4o + embeddings si ré-indexation)
 
 ### Niveau 3 : Scoring Final
 
@@ -409,6 +417,16 @@ RESEND_API_KEY=re_...
 # Fichier: supabase-setup.sql
 ```
 
+### Indexer le corpus RAG (analyse sémantique)
+
+L’agent de qualification s’appuie sur une base vectorielle. Après clône ou modification de `rag/balthazar_corpus.jsonl` :
+
+```bash
+LIBSQL_URL=file:rag/vector.db npx tsx scripts/rag/index-balthazar.ts
+```
+
+Voir [docs/RAG_ET_EVALS.md](./docs/RAG_ET_EVALS.md) pour le détail.
+
 ### Lancer le Serveur
 
 ```bash
@@ -419,13 +437,27 @@ Le serveur Mastra démarre sur `http://localhost:4111` (port configuré dans `sr
 
 ---
 
-## 📚 Documentation Détaillée
+## 📚 Documentation
 
-- **[BOAMP_FETCH.md](./BOAMP_FETCH.md)** - Documentation technique complète de l'outil BOAMP
-- **[MARCHESONLINE_RSS_FETCH.md](./MARCHESONLINE_RSS_FETCH.md)** - Documentation technique complète de l'outil MarchesOnline RSS
-- **[WORKFLOW_AO_VEILLE.md](./WORKFLOW_AO_VEILLE.md)** - Documentation détaillée du workflow d'analyse
-- **[GITHUB_WORKFLOW_QUOTIDIEN.md](./GITHUB_WORKFLOW_QUOTIDIEN.md)** - Documentation du déclenchement automatique quotidien via GitHub Actions
-- **[CHECKLIST_PRE_PUSH_WORKFLOW.md](./CHECKLIST_PRE_PUSH_WORKFLOW.md)** - Checklist complète à utiliser avant chaque modification du workflow GitHub Actions
+### Référence technique
+
+- **[docs/RAG_ET_EVALS.md](./docs/RAG_ET_EVALS.md)** — RAG Balthazar (corpus, indexation, outils), packs d’évaluation et état du système
+- **[BOAMP_FETCH.md](./BOAMP_FETCH.md)** — Outil BOAMP
+- **[MARCHESONLINE_RSS_FETCH.md](./MARCHESONLINE_RSS_FETCH.md)** — Outil MarchesOnline RSS
+- **[WORKFLOW_AO_VEILLE.md](./WORKFLOW_AO_VEILLE.md)** — Workflow d’analyse AO
+- **[EXPLICATION_SYSTEME_SCORING.md](./EXPLICATION_SYSTEME_SCORING.md)** — Détail du scoring (keywords, formules)
+
+### Déploiement et automatisation
+
+- **[GITHUB_WORKFLOW_QUOTIDIEN.md](./GITHUB_WORKFLOW_QUOTIDIEN.md)** — Déclenchement quotidien (GitHub Actions)
+- **[CHECKLIST_PRE_PUSH_WORKFLOW.md](./CHECKLIST_PRE_PUSH_WORKFLOW.md)** — Checklist avant modification du workflow GitHub
+- **[DEPLOIEMENT_MASTRA_CLOUD.md](./DEPLOIEMENT_MASTRA_CLOUD.md)** — Déploiement Mastra Cloud
+
+### Référence métier
+
+- **[RAG-Expertise-Balthazar.md](./RAG-Expertise-Balthazar.md)** — Expertise et positionnement Balthazar (source du corpus RAG)
+- **[MOTS_CLES_ANALYSE.md](./MOTS_CLES_ANALYSE.md)** — Mots-clés et analyse
+- **[nouveau-keywords.md](./nouveau-keywords.md)** — Évolution du lexique keywords
 
 ---
 
@@ -597,7 +629,7 @@ Les AO analysés sont sauvegardés dans `appels_offres` avec :
 
 ---
 
-## 🧪 Tests
+## 🧪 Tests et évaluations
 
 ```bash
 # Tests unitaires (rectificatifs)
@@ -611,6 +643,12 @@ npm run test:retry:all
 
 # Test workflow complet
 ts-node scripts/test-workflow-trigger.sh
+
+# Évaluations RAG (pack synthétique 30 cas)
+LIBSQL_URL=file:rag/vector.db npx tsx evals/balthazar-scope-pack.ts
+
+# Évaluations RAG (pack cas réels 42 cas, ~15 min)
+LIBSQL_URL=file:rag/vector.db npx tsx evals/balthazar-real-cases.ts
 ```
 
 ---
@@ -628,8 +666,8 @@ Le système log automatiquement :
 ### Coûts Typiques
 
 - **Keyword Matching** : Gratuit (0€)
-- **Semantic Analysis** : ~0.003€ par AO (GPT-4o-mini)
-- **Coût quotidien moyen** : ~1-2€ pour 500 AO analysés
+- **Semantic Analysis** : ~0.01–0.02€ par AO (GPT-4o + RAG)
+- **Coût quotidien moyen** : ~5–10€ pour 500 AO analysés
 
 ---
 
@@ -646,7 +684,7 @@ Le système log automatiquement :
 ## 🛠️ Stack Technique
 
 - **Framework** : [Mastra](https://mastra.ai/) (workflows agentiques)
-- **LLM** : OpenAI GPT-4o-mini (via agent)
+- **LLM** : OpenAI GPT-4o (agent + RAG)
 - **Base de données** : Supabase (PostgreSQL)
 - **API** : BOAMP OpenDataSoft v2.1
 - **RSS** : MarchesOnline (flux RSS)
@@ -666,11 +704,7 @@ Propriétaire - Balthazar Consulting
 
 Pour toute question ou problème :
 - 📧 Email : contact@balthazar-consulting.fr
-- 📚 Documentation : 
-  - `BOAMP_FETCH.md` - Documentation de l'outil BOAMP
-  - `MARCHESONLINE_RSS_FETCH.md` - Documentation de l'outil MarchesOnline RSS
-  - `WORKFLOW_AO_VEILLE.md` - Documentation du workflow principal
-  - `GITHUB_WORKFLOW_QUOTIDIEN.md` - Documentation du déclenchement automatique quotidien
+- 📚 Documentation : voir la section [Documentation](#-documentation) ci-dessus (RAG/evals, BOAMP, MarchesOnline, workflow, déploiement).
 
 ---
 

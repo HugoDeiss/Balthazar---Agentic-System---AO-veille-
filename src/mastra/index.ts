@@ -1,4 +1,5 @@
 import { Mastra } from "@mastra/core/mastra";
+import { PgVector } from "@mastra/pg";
 
 // Import agents
 import { 
@@ -7,6 +8,14 @@ import {
 
 // Import workflows
 import { aoVeilleWorkflow } from "./workflows";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vector Store — Supabase PostgreSQL + pgvector (via @mastra/vector-pg)
+// Uses DATABASE_URL (Postgres connection string) for both dev and prod.
+// ─────────────────────────────────────────────────────────────────────────────
+const balthazarKnowledgeStore = new PgVector({
+  connectionString: process.env.DATABASE_URL!,
+});
 
 /**
  * Balthazar Tender Monitoring System
@@ -29,11 +38,16 @@ import { aoVeilleWorkflow } from "./workflows";
  */
 export const mastra = new Mastra({
   agents: {
-    // Agents spécialisés pour l'analyse BOAMP
     boampSemanticAnalyzer,
   },
   workflows: {
     aoVeilleWorkflow,
+  },
+  vectors: {
+    // Single LibSQL store exposing two indexes: "policies" and "case_studies"
+    // The tools in balthazar-rag-tools.ts access this store directly via env vars
+    // (singleton pattern) so they don't need to go through the Mastra instance.
+    balthazarKnowledge: balthazarKnowledgeStore,
   },
   bundler: {
     externals: [

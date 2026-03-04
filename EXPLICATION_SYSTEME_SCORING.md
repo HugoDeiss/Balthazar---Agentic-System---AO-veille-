@@ -45,7 +45,7 @@ Le lexique est organisé en **3 catégories qui attribuent des points** (secteur
 
 **Plafond de score** : 50 points maximum pour tous les secteurs combinés
 
-#### 2. EXPERTISES MÉTIER (Pondération ×2)
+#### 2. EXPERTISES MÉTIER (Pondération ×3)
 
 **Expertises détectées :**
 - **Conseil** (prestation de conseil, consulting, mission de conseil, cabinet de conseil)
@@ -59,7 +59,7 @@ Le lexique est organisé en **3 catégories qui attribuent des points** (secteur
 
 **Plafond de score** : 40 points maximum pour toutes les expertises combinées
 
-#### 3. POSTURE D'INTERVENTION (Pondération ×1)
+#### 3. POSTURE D'INTERVENTION (Pondération ×3)
 
 **Méthodologie Balthazar détectée :**
 - Approche participative (ateliers, co-construction)
@@ -89,9 +89,9 @@ score_catégorie = log(nombre_matches + 1) × poids × 3.5
      - 10 matches → log(11) = 2.40
 
 2. **`× poids`** : Multiplicateur selon l'importance
-   - Secteurs : ×3 (ou ×4 pour entreprise_mission)
-   - Expertises : ×2
-   - Posture : ×1
+   - Secteurs : ×3 (ou ×4 pour `entreprise_mission`)
+   - Expertises : ×3
+   - Posture : ×3
 
 3. **`× 3.5`** : Coefficient de graduation
    - Ajuste la courbe pour une progression douce
@@ -142,6 +142,13 @@ Le système applique ensuite des **bonus et malus** pour affiner le score :
 
 5. **Multi-expertises** : +5 points
    - Si 2 ou plus expertises détectées
+
+6. **Mots-clés forts “stratégie / innovation”** : +8 points  
+   - Si le texte contient des formulations fortes autour de la stratégie ou de l’innovation, par exemple :
+     - « stratégie », « stratégies »
+     - « stratégique », « stratégiques »
+     - « plan stratégique », « plans stratégiques »
+     - Des formes contenant « innov… » : innovation, innovations, innovant, innovante, etc.
 
 #### MALUS (Points retirés)
 

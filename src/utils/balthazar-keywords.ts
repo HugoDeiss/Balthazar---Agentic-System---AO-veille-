@@ -134,13 +134,18 @@ export const balthazarLexicon = {
     }
   },
 
-  // EXPERTISES MÉTIER (pondération 2x - critère #2 Balthazar)
+  // EXPERTISES MÉTIER (pondération 3x - critère #2 Balthazar)
   expertises: {
     strategie: {
-      weight: 2,
+      weight: 3,
       keywords: [
-        "stratégie", "strategie", "stratégique", "strategique",
-        "plan stratégique", "diagnostic stratégique",
+        "stratégie", "strategie", "stratégies", "strategies",
+        "stratégique", "strategique", "stratégiques", "strategiques",
+        "plan stratégique", "plan strategique",
+        "plans stratégiques", "plans strategiques",
+        "plan de stratégie", "plan de strategie",
+        "plan stratégique de développement", "plan strategique de developpement",
+        "diagnostic stratégique", "diagnostic strategique",
         "business model", "modèle économique",
         "trajectoire", "vision", "orientation",
         "feuille de route", "roadmap", "road map",
@@ -162,7 +167,7 @@ export const balthazarLexicon = {
     },
     // Prestation de conseil / consulting (nature de la mission demandée)
     conseil: {
-      weight: 2,
+      weight: 3,
       keywords: [
         "conseil", "consulting",
         "prestation de conseil", "prestation conseil",
@@ -180,7 +185,7 @@ export const balthazarLexicon = {
       ]
     },
     transformation: {
-      weight: 2,
+      weight: 3,
       keywords: [
         "transformation", "mutation", "évolution",
         "refonte", "modernisation", "restructuration",
@@ -192,7 +197,16 @@ export const balthazarLexicon = {
         "réorganisation", "reorganisation",
         "agilité", "agilite", "méthode agile",
         "lean", "amélioration continue",
-        "innovation organisationnelle"
+        "innovation organisationnelle",
+        // Ajouts culture / transformation culturelle
+        "culturel", "culturelle",
+        "culture d'entreprise", "culture d’entreprise",
+        "culture organisationnelle",
+        "culture managériale", "culture managériale",
+        "culture de performance",
+        "culture d'innovation", "culture d’innovation",
+        "transformation culturelle",
+        "évolution culturelle", "evolution culturelle"
       ],
       patterns: [
         /transformation/i,
@@ -200,11 +214,19 @@ export const balthazarLexicon = {
         /change\s+management/i,
         /modernisation/i,
         /transformation\s+(digitale|num(é|e)rique)/i,
-        /m(é|e)thode\s+agile/i
+        /m(é|e)thode\s+agile/i,
+        // Culture / transformation culturelle
+        /culture\s+d['']?entreprise/i,
+        /culture\s+organisationnelle/i,
+        /culture\s+manag(é|e)riale/i,
+        /culture\s+de\s+performance/i,
+        /culture\s+d['']?innovation/i,
+        /transformation\s+culturelle/i,
+        /(é|e)volution\s+culturelle/i
       ]
     },
     raison_etre: {
-      weight: 2,
+      weight: 3,
       keywords: [
         "raison d'être", "raison d'etre", "raison detre",
         "société à mission", "societe a mission",
@@ -218,7 +240,7 @@ export const balthazarLexicon = {
       ]
     },
     gouvernance: {
-      weight: 2,
+      weight: 3,
       keywords: [
         "gouvernance", "codir", "comex", "comité direction",
         "direction générale", "management", "pilotage",
@@ -242,7 +264,7 @@ export const balthazarLexicon = {
       ]
     },
     rse: {
-      weight: 2,
+      weight: 3,
       keywords: [
         "rse", "responsabilité sociétale",
         "développement durable", "esg",
@@ -268,7 +290,7 @@ export const balthazarLexicon = {
       ]
     },
     experience_usager: {
-      weight: 2,
+      weight: 3,
       keywords: [
         "expérience usager", "experience usager",
         "expérience client", "relation client",
@@ -293,38 +315,67 @@ export const balthazarLexicon = {
     },
     // 4 axes stratégiques Balthazar (NOUVEAU - CRITIQUE)
     strategie_developpement: {
-      weight: 2,
+      weight: 3,
       keywords: [
         "stratégie de développement", "trajectoire", "performance pérenne",
         "analyse de marché", "études prospectives", "étude d'opportunités",
         "business plan", "résilience", "robustesse modèle économique",
         "stratégie M&A", "croissance externe", "acquisition",
         "réponse appels d'offres complexes",
-        "innovation", "lancement nouvelles activités"
+        "innovation", "lancement nouvelles activités",
+        // Ajouts autour de l'innovation / portefeuille
+        "stratégie d'innovation", "stratégie d’innovation",
+        "gouvernance de l'innovation", "gouvernance de l’innovation",
+        "portefeuille d'innovation", "portefeuille d’innovation",
+        "pilotage innovation", "gestion de l'innovation", "gestion de l’innovation",
+        "comité innovation",
+        "open innovation",
+        "innovation stratégique", "innovation organisationnelle",
+        "innovation de modèle économique", "innovation de modele economique"
       ],
       patterns: [
         /strat(é|e)gie\s+de\s+d(é|e)veloppement/i,
         /strat(é|e)gie\s+m&a/i,
-        /croissance\s+externe/i
+        /croissance\s+externe/i,
+        /strat(é|e)gie\s+d['']?innovation/i,
+        /gouvernance\s+innovation/i,
+        /portefeuille\s+innovation/i,
+        /innovation\s+(strat(é|e)gique|organisationnelle)/i
       ]
     },
     strategie_transformation: {
-      weight: 2,
+      weight: 3,
       keywords: [
         "stratégie de transformation", "co-construction",
         "analyse d'impact", "analyse de risque",
         "roadmap", "programme de transformation",
         "plan de performance", "déclinaison organisationnelle",
         "modèle opérationnel cible", "nouveau modèle opérationnel",
-        "agilité", "méthode agile", "lean", "amélioration continue"
+        "agilité", "méthode agile", "lean", "amélioration continue",
+        // Ajouts autour de l'IA stratégique
+        "IA stratégique", "ia stratégique", "ia strategique",
+        "intelligence artificielle",
+        "usage stratégique de l'IA", "usage stratégique de l’IA", "usage strategique de l'ia",
+        "transformation par l'IA", "transformation par l’IA", "transformation par l'ia",
+        "gouvernance IA", "gouvernance ia",
+        "cadrage IA", "cadrage ia",
+        "stratégie IA", "strategie ia",
+        "feuille de route IA", "feuille de route ia",
+        "maturité IA", "maturité ia", "maturite ia",
+        "acculturation IA", "acculturation ia"
       ],
       patterns: [
         /strat(é|e)gie\s+de\s+transformation/i,
-        /mod(è|e)le\s+op(é|e)rationnel\s+cible/i
+        /mod(è|e)le\s+op(é|e)rationnel\s+cible/i,
+        /intelligence\s+artificielle/i,
+        /strat(é|e)gie\s+ia/i,
+        /feuille\s+de\s+route\s+ia/i,
+        /gouvernance\s+ia/i,
+        /usage\s+(strat(é|e)gique\s+)?ia/i
       ]
     },
     strategie_responsable: {
-      weight: 2,
+      weight: 3,
       keywords: [
         "stratégie responsable", "impact", "écosystème",
         "feuille de route RSE", "csrd", "reporting extra-financier",
@@ -340,7 +391,7 @@ export const balthazarLexicon = {
       ]
     },
     strategie_mobilisation: {
-      weight: 2,
+      weight: 3,
       keywords: [
         "stratégie de mobilisation", "embarquer parties prenantes",
         "dynamique collective", "dynamique puissante",
@@ -359,9 +410,9 @@ export const balthazarLexicon = {
     }
   },
 
-  // POSTURE INTERVENTION (pondération 1x - bonus)
+  // POSTURE INTERVENTION (pondération 3x - bonus)
   posture: {
-    weight: 1,
+    weight: 3,
     keywords: [
       // Existants
       "diagnostic", "audit", "état des lieux", "analyse",
@@ -490,11 +541,31 @@ export const balthazarLexicon = {
   
   // CLIENTS RÉFÉRENCES BALTHAZAR (détection forte pertinence)
   clients_references: [
+    // Mobilité
     "ratp", "sncf", "atmb", "tisseo", "idfm", "sytral",
     "tcl lyon", "lagardère travel retail", "lagardere travel retail",
     "sncf fret", "sncf voyageurs", "sncf réseau", "sncf reseau",
+    "eurostar", "getlink", "ouigo", "ouigo espana", "ter",
+    "tisséo ingénierie", "tisséo voyageurs", "tisséo collectivité",
+    "ratp solutions villes", "ratp smart systems", "ratp développement",
+    "kisio", "sytral mobilités",
+    "sncf gares et connexions",
+    "europcar", "aéroport de paris", "air france",
+    "transdev", "kéolis", "cfl",
+    "autoroutes et tunnels du mont blanc",
+    // Assurance
     "maif", "groupama", "carsat",
+    "carsat normandie", "carsat centre ouest",
+    "ggvie", "groupama immobilier",
+    "covea", "gan assurances",
+    "ag2r la mondiale", "abeille",
+    "allianz", "axa", "mgen", "macif",
+    "april", "apicil", "relyens", "malakoff humanis",
+    // Énergie
     "edf", "engie", "grt gaz", "grdf",
+    "cnr", "enedis", "veolia", "rte",
+    "antargaz", "schneider electric",
+    // Autres
     "gca", "groupement crédit agricole", "groupement credit agricole"
   ]
 } as const;
@@ -787,6 +858,27 @@ export function calculateEnhancedKeywordScore(
   if (baseScoreResult.expertise_matches.length >= 2) {
     finalScore += 5;
     bonusDetails.push('multi_expertises');
+  }
+  
+  // BONUS 5 : Mots-clés forts (stratégie / innovation)
+  // Utilise le texte normalisé (sans accents) pour capturer plusieurs variantes
+  const hasStrongStrategyKeyword =
+    fullText.includes('strategie') ||
+    fullText.includes('strategies') ||
+    fullText.includes('strategique') ||
+    fullText.includes('strategiques') ||
+    fullText.includes('plan strategique') ||
+    fullText.includes('plans strategiques') ||
+    fullText.includes('plan de strategie');
+  
+  // "innov" capte : innovation, innovations, innovant, innovante, innovants, innovantes, innovateur...
+  const hasStrongInnovationKeyword =
+    fullText.includes('innov');
+  
+  if (hasStrongStrategyKeyword || hasStrongInnovationKeyword) {
+    // Bonus modéré mais significatif : +8 points
+    finalScore += 8;
+    bonusDetails.push('high_impact_keywords_strategie_innovation');
   }
   
   // MALUS 1 : Red flags critiques (-30 points mais pas éliminatoire)

@@ -6,3 +6,9 @@
 
 export { boampFetcherTool, type CanonicalAO } from "./boamp-fetcher";
 export { marchesonlineRSSFetcherTool } from "./marchesonline-rss-fetcher";
+export {
+  balthazarPoliciesQueryTool,
+  balthazarCaseStudiesQueryTool,
+  clientHistoryLookupTool,
+  aoTextVerificationTool,
+} from "./balthazar-rag-tools";
