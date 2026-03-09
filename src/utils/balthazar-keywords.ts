@@ -174,13 +174,17 @@ export const balthazarLexicon = {
         "mission de conseil", "mission conseil",
         "cabinet de conseil", "conseil en stratégie",
         "conseil en strategie", "conseil en transformation",
-        "accompagnement en conseil"
+        "accompagnement en conseil",
+        "conseil en organisation", "conseil organisation",
+        "conseil en management", "conseil management",
+        "conseil en performance", "conseil performance",
+        "organisation d'entreprise", "organisation d entreprise"
       ],
       patterns: [
         /prestation\s+(de\s+)?conseil/i,
         /mission\s+(de\s+)?conseil/i,
         /cabinet\s+de\s+conseil/i,
-        /conseil\s+en\s+(strat(é|e)gie|transformation)/i,
+        /conseil\s+en\s+(strat(é|e)gie|transformation|organisation|management|performance)/i,
         /\bconsulting\b/i
       ]
     },
@@ -515,7 +519,19 @@ export const balthazarLexicon = {
       "catalogue formation",
       "assistance maîtrise ouvrage technique",
       "amo si", "amo système information", "amo systeme information",
-      "vabf", "vma", "vsma"
+      "vabf", "vma", "vsma",
+      // Déchets / collecte (faux ami transport → red flag critique)
+      "déchets", "dechets", "déchet", "dechet",
+      "collecte des déchets", "collecte des dechets",
+      "traitement des déchets", "traitement des dechets",
+      "ordures ménagères", "ordures menageres",
+      "déchetterie", "decheterie",
+      "encombrants", "dépôts sauvages", "depots sauvages",
+      // Exploitation DSP (faux ami mobilité → red flag)
+      "exploitation d'un service", "exploitation du service",
+      "exploitation d'une délégation", "exploitation d'une delegation",
+      "délégation de service public", "delegation de service public",
+      "dsp exploitation", "exploitant du service"
     ],
     patterns: [
       // Existants
@@ -535,7 +551,16 @@ export const balthazarLexicon = {
       /livraison\s+(d.)?((é|e)quipement|mat(é|e)riel)/i,
       /maintenance\s+(informatique|technique|it)/i,
       /formation\s+(bureautique|technique|r(é|e)glementaire)/i,
-      /amo\s+(si|syst(è|e)me)/i
+      /amo\s+(si|syst(è|e)me)/i,
+      // Déchets / collecte
+      /d(é|e)chets?/i,
+      /collecte\s+(des\s+)?d(é|e)chets?/i,
+      /traitement\s+(des\s+)?d(é|e)chets?/i,
+      /ordures\s+m(é|e)nag(è|e)res?/i,
+      // Exploitation DSP
+      /exploitation\s+d.?un\s+service/i,
+      /d(é|e)l(é|e)gation\s+de\s+service\s+public/i,
+      /\bdsp\s+exploitation\b/i
     ]
   },
   
@@ -776,13 +801,14 @@ export function shouldSkipLLM(scoreResult: KeywordScoreResult): {
     }
   }
   
-  // Cas 3 : Score faible MAIS confidence élevée → analyser quand même !
+  // Cas 3 : Score faible MAIS confidence élevée ou moyenne → analyser quand même !
   if (score >= 20 && score < 30) {
-    if (confidence === 'HIGH') {
-      // Exception : HIGH confidence = secteur + expertise matchés
-      // → Analyser avec LLM malgré score faible (peut-être posture manquante)
+    if (confidence === 'HIGH' || confidence === 'MEDIUM') {
+      // Exception : MEDIUM/HIGH confidence = au moins secteur OU expertise matchés
+      // → Analyser avec LLM malgré score faible (signal métier réel, périmètre potentiel)
       return { skip: false, priority: 'MEDIUM' };
     }
+    // LOW confidence dans cette plage : bruit ou keywords trop génériques → skip
     return { skip: true, reason: 'score_faible', priority: 'LOW' };
   }
   

@@ -303,7 +303,7 @@ rag_sources: chunk_id les plus SPÉCIFIQUES utilisés — désambiguïsation > s
 // FALLBACK
 // ──────────────────────────────────────────────────
 
-const DEFAULT_FALLBACK_ANALYSIS: BalthazarSemanticAnalysis = {
+export const DEFAULT_FALLBACK_ANALYSIS: BalthazarSemanticAnalysis = {
   fit_sectoriel: { score: 0, secteur_detecte: 'autre', justification: 'Erreur de parsing' },
   fit_expertise: { score: 0, expertises_detectees: [], justification: 'Erreur de parsing' },
   fit_posture: { score: 0, niveau_intervention: 'inconnu', approche: [], justification: 'Erreur de parsing' },

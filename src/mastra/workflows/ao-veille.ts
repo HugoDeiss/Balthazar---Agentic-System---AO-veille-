@@ -11,7 +11,7 @@ import {
 import { checkBatchAlreadyAnalyzed } from '../../persistence/ao-persistence';
 import { scheduleRetry } from '../../utils/retry-scheduler';
 import { calculateKeywordScore, calculateEnhancedKeywordScore, shouldSkipLLM } from '../../utils/balthazar-keywords';
-import { analyzeSemanticRelevance } from '../agents/boamp-semantic-analyzer';
+import { analyzeSemanticRelevance, DEFAULT_FALLBACK_ANALYSIS } from '../agents/boamp-semantic-analyzer';
 import { findBatchBOAMPMatches } from '../../utils/cross-platform-dedup';
 import { generateEmailHTML, generateEmailText, generateEmailSubject, type EmailData } from '../../utils/email-templates';
 import { sendEmail } from '../../utils/email-sender';
@@ -1530,10 +1530,33 @@ const analyzeOneAOSemanticStep = createStep({
     const { ao, client } = inputData;
     
     console.log(`🔍 Analyse sémantique de l'AO: ${ao.title}`);
-    
+
     // Récupérer keywordDetails si disponible
     const keywordDetails = (ao as any).keywordDetails || null;
-    
+
+    // Gate explicite : si le score keywords est insuffisant, ne pas appeler le LLM/RAG
+    // Défense en profondeur — le branching de processOneAOWorkflow devrait déjà éviter ce cas,
+    // mais on l'applique ici aussi en cas de propagation incomplète du flag _shouldSkipLLM.
+    if (keywordDetails) {
+      const skipDecision = shouldSkipLLM(keywordDetails);
+      if (skipDecision.skip) {
+        console.log(`[ao-veille] LLM gate: skip "${ao.title}" — kwScore: ${keywordDetails.adjustedScore ?? keywordDetails.score}/100 (${skipDecision.reason})`);
+        const kwScoreOn10 = ((keywordDetails.adjustedScore ?? keywordDetails.score ?? 0) / 100) * 0.5;
+        const daysRemaining = getDaysRemaining(ao.deadline || '');
+        return {
+          ao: {
+            ...ao,
+            semanticScore: kwScoreOn10,
+            semanticReason: 'Hors périmètre — score mots-clés insuffisant.',
+            semanticDetails: DEFAULT_FALLBACK_ANALYSIS,
+            procedureType: ao.raw_json?.procedure_libelle || null,
+            daysRemaining
+          },
+          client
+        };
+      }
+    }
+
     // Utiliser la nouvelle fonction avec structured output
     const result = await analyzeSemanticRelevance(ao, keywordDetails);
     
@@ -2124,9 +2147,10 @@ export const aoVeilleWorkflow = createWorkflow({
   // ═══════════════════════════════════════════════════════
   // PHASE 3 : TRAITEMENT INDIVIDUEL PAR AO (LLM)
   // ═══════════════════════════════════════════════════════
-  // Chaque AO est traité individuellement par le workflow imbriqué
-  // avec un maximum de 10 AO en parallèle pour contrôler le rate limiting
-  .foreach(processOneAOWorkflow, { concurrency: 10 })
+  // Chaque AO est traité individuellement par le workflow imbriqué.
+  // Concurrency à 3 : GPT-4o consomme ~10K tokens/appel, limite TPM = 30K → max 3 appels simultanés.
+  // Les AOs skippés (branch 2.5) ne consomment aucun token et ne contribuent pas à la limite.
+  .foreach(processOneAOWorkflow, { concurrency: 3 })
   
   // ═══════════════════════════════════════════════════════
   // PHASE 3.5 : NORMALISATION DES RÉSULTATS BRANCHÉS
