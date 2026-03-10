@@ -81,7 +81,7 @@ Returns ranked policy chunks with chunk_id (cite these in rag_sources).`,
 
   inputSchema: z.object({
     query: z.string().describe('The semantic query to retrieve relevant policy rules for this AO'),
-    topK: z.number().describe('Number of chunks to retrieve (use 5 for general queries, 3 for targeted queries)'),
+    topK: z.number().describe('Number of chunks to retrieve. USE 1 for disambiguation queries (you need exactly 1 specific rule). USE 2 for sector or mandate queries. NEVER exceed 3.'),
     filter_type: z.enum([
       'sector_definition',
       'mandate_type',
@@ -89,7 +89,7 @@ Returns ranked policy chunks with chunk_id (cite these in rag_sources).`,
       'conditional_rule',
       'priority_rule',
       'disambiguation_rule',
-    ]).nullable().describe('Metadata type filter — pass null to search all types, or specify a type to narrow retrieval'),
+    ]).nullable().describe('ALWAYS specify a type when you know it — this avoids retrieving irrelevant chunks. Use null only as last resort. sector check → sector_definition | mission check → mandate_type or exclusion_rule | ambiguous term → disambiguation_rule | priority → priority_rule'),
   }),
 
   execute: async ({ context }) => {
@@ -151,9 +151,9 @@ Returns similar case study chunks with chunk_id (cite these in rag_sources).`,
 
   inputSchema: z.object({
     query: z.string().describe('The query to find similar Balthazar missions (describe the AO nature and context)'),
-    topK: z.number().describe('Number of similar cases to retrieve (use 3 typically)'),
+    topK: z.number().describe('Number of similar cases to retrieve. Use 2 max — case studies are for illustration only, not validation.'),
     filter_secteur: z.enum(['mobilite', 'assurance', 'energie', 'public']).nullable()
-      .describe('Sector filter — pass null to search all sectors, or specify one to improve precision'),
+      .describe('ALWAYS specify the sector when known — avoids retrieving irrelevant case studies from other sectors.'),
   }),
 
   execute: async ({ context }) => {

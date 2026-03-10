@@ -93,10 +93,12 @@ export const balthazarLexicon = {
       keywords: [
         "service public", "services publics", "opérateur public",
         "établissement public", "collectivité", "collectivités",
-        "commune", "métropole", "région", "département",
-        "intercommunalité", "epci", "syndicat",
+        // "commune", "région", "département" retirés : trop génériques,
+        // ils apparaissent dans les localisations géographiques de tout AO
+        // et génèrent des faux positifs (ex: "dans le département du Vaucluse")
+        "intercommunalité", "epci", "syndicat intercommunal",
         // Ajouts recommandés
-        "administration", "territoriale",
+        "territoriale",
         "conseil régional", "conseil regional",
         "conseil départemental", "conseil departemental",
         "mairie", "préfecture", "prefecture",
@@ -422,7 +424,13 @@ export const balthazarLexicon = {
       "diagnostic", "audit", "état des lieux", "analyse",
       "atelier", "ateliers", "co-construction", "coconstruction",
       "participatif", "participative", "concertation",
-      "accompagnement", "déploiement", "mise en œuvre",
+      // "accompagnement" seul retiré : trop générique (ex: "accompagnement social")
+      // Remplacé par des formes qualifiées stratégiques uniquement
+      "accompagnement stratégique", "accompagnement strategique",
+      "accompagnement transformation", "accompagnement organisationnel",
+      "accompagnement au changement", "accompagnement managerial",
+      "accompagnement managérial",
+      "déploiement", "mise en œuvre",
       "mise en oeuvre", "plan d'action", "plan d'actions",
       // Ajouts recommandés
       "atelier participatif",
