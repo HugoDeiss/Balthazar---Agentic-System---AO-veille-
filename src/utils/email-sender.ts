@@ -10,11 +10,16 @@ import { Resend } from 'resend';
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Recipient list for AO Veille notifications
-const RECIPIENTS = [
-  'l.lamarlere@balthazar.org',
-  'p.rigaud@balthazar.org',
-  'a.gaillouste@balthazar.org'
-];
+// Permet un override via variable d'environnement pour les tests locaux :
+// RESEND_TO_OVERRIDE="you@example.com,other@example.com"
+const OVERRIDE_TO = process.env.RESEND_TO_OVERRIDE;
+const RECIPIENTS = OVERRIDE_TO
+  ? OVERRIDE_TO.split(',').map(r => r.trim()).filter(Boolean)
+  : [
+      'l.lamarlere@balthazar.org',
+      'p.rigaud@balthazar.org',
+      'a.gaillouste@balthazar.org'
+    ];
 
 // Sender email (defaults to Resend's default sender when no custom domain is configured)
 const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev';

@@ -11,7 +11,7 @@ import {
 import { checkBatchAlreadyAnalyzed } from '../../persistence/ao-persistence';
 import { scheduleRetry } from '../../utils/retry-scheduler';
 import { calculateKeywordScore, calculateEnhancedKeywordScore, shouldSkipLLM } from '../../utils/balthazar-keywords';
-import { analyzeSemanticRelevance, DEFAULT_FALLBACK_ANALYSIS } from '../agents/boamp-semantic-analyzer';
+import { analyzeSemanticRelevance, DEFAULT_FALLBACK_ANALYSIS, type BalthazarSemanticAnalysis } from '../agents/boamp-semantic-analyzer';
 import { findBatchBOAMPMatches } from '../../utils/cross-platform-dedup';
 import { generateEmailHTML, generateEmailText, generateEmailSubject, type EmailData } from '../../utils/email-templates';
 import { sendEmail } from '../../utils/email-sender';
@@ -1141,6 +1141,37 @@ const sendEmailStep = createStep({
     emailSent: z.boolean()
   }),
   execute: async ({ inputData }) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/47047336-9ba9-46bc-8514-68d0aeb42d2c', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '468a95'
+      },
+      body: JSON.stringify({
+        sessionId: '468a95',
+        runId: 'pre-fix',
+        hypothesisId: 'A',
+        location: 'ao-veille.ts:send-email',
+        message: 'Entering sendEmailStep',
+        data: {
+          clientId: inputData.client?.id ?? null,
+          clientEmail: inputData.client?.email ?? null,
+          saved: inputData.saved,
+          high: inputData.high,
+          medium: inputData.medium,
+          low: inputData.low,
+          cancelled: inputData.cancelled,
+          llmCalls: inputData.llmCalls,
+          since: inputData.since ?? null,
+          until: inputData.until ?? null,
+          statsBySource: inputData.statsBySource
+        },
+        timestamp: Date.now()
+      })
+    }).catch(() => {});
+    // #endregion
+
     // ────────────────────────────────────────────────────────────
     // 1. VÉRIFICATION PRÉALABLE
     // ────────────────────────────────────────────────────────────
@@ -1636,8 +1667,29 @@ const scoreOneAOStep = createStep({
     const priority: 'HIGH' | 'MEDIUM' | 'LOW' = 
       score >= 8 ? 'HIGH' :
       score >= 6 ? 'MEDIUM' : 'LOW';
-    
-    console.log(`✅ Score final: ${score.toFixed(2)}/10 - Priorité: ${priority} - ${ao.title}`);
+
+    // Override: if the agent explicitly decided HAUTE or MOYENNE priorité,
+    // don't downgrade to LOW based on numeric score alone.
+    // Guard: only apply when semanticDetails is a real analysis, not DEFAULT_FALLBACK_ANALYSIS
+    // (detected via recommandation !== 'NON_PERTINENT' AND score_semantique_global > 0).
+    const semanticDetails = (ao as any).semanticDetails as BalthazarSemanticAnalysis | null;
+    const agentRecommandation = semanticDetails?.recommandation;
+    const isRealAnalysis =
+      agentRecommandation &&
+      agentRecommandation !== 'NON_PERTINENT' &&
+      (semanticDetails?.score_semantique_global ?? 0) > 0;
+
+    let finalPriority = priority;
+    if (isRealAnalysis && finalPriority === 'LOW') {
+      if (agentRecommandation === 'HAUTE_PRIORITE') finalPriority = 'HIGH';
+      else if (agentRecommandation === 'MOYENNE_PRIORITE') finalPriority = 'MEDIUM';
+    }
+
+    if (finalPriority !== priority) {
+      console.log(`   ⬆️  Override priorité: ${priority} → ${finalPriority} (agent: ${agentRecommandation})`);
+    }
+
+    console.log(`✅ Score final: ${score.toFixed(2)}/10 - Priorité: ${finalPriority} - ${ao.title}`);
     if ((ao as any).keywordDetails) {
       const details = (ao as any).keywordDetails;
       console.log(`   📊 Keyword breakdown: Secteurs ${details.breakdown.secteur_score} + Expertises ${details.breakdown.expertise_score} + Posture ${details.breakdown.posture_score} = ${details.score}/100`);
@@ -1647,7 +1699,7 @@ const scoreOneAOStep = createStep({
       ao: {
         ...ao,
         finalScore: score,
-        priority
+        priority: finalPriority
       },
       client
     };
@@ -2150,7 +2202,7 @@ export const aoVeilleWorkflow = createWorkflow({
   // Chaque AO est traité individuellement par le workflow imbriqué.
   // Concurrency à 3 : GPT-4o consomme ~10K tokens/appel, limite TPM = 30K → max 3 appels simultanés.
   // Les AOs skippés (branch 2.5) ne consomment aucun token et ne contribuent pas à la limite.
-  .foreach(processOneAOWorkflow, { concurrency: 3 })
+  .foreach(processOneAOWorkflow, { concurrency: 2 })
   
   // ═══════════════════════════════════════════════════════
   // PHASE 3.5 : NORMALISATION DES RÉSULTATS BRANCHÉS
