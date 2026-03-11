@@ -403,11 +403,7 @@ export const boampFetcherTool = createTool({
     
     // Tableau pour accumuler les AO normalisés (pour retour au workflow)
     const records: CanonicalAO[] = [];
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'boamp-fetcher.ts:268',message:'Records array initialized',data:{recordsIsArray:Array.isArray(records),recordsLength:records.length,recordsType:typeof records},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
-    
+
     let offset = 0;
     let totalCount = 0;
     let pageNumber = 1;
@@ -518,11 +514,7 @@ export const boampFetcherTool = createTool({
     
     // Déterminer le statut basé sur missing
     const status = missing > 0 ? 'DEGRADED' : 'COMPLETE';
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'boamp-fetcher.ts:421',message:'Before return - check records',data:{recordsIsUndefined:records===undefined,recordsIsNull:records===null,recordsType:typeof records,recordsIsArray:Array.isArray(records),recordsLength:records?.length,totalCount,fetchedCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B,C'})}).catch(()=>{});
-    // #endregion
-    
+
     // Retourner la structure attendue par le workflow
     // Les AO normalisés sont retournés pour traitement par le workflow
     const returnValue = {
@@ -540,11 +532,7 @@ export const boampFetcherTool = createTool({
       status: status,
       records: records // Tableau des AO normalisés pour le workflow
     };
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'boamp-fetcher.ts:435',message:'Return value structure',data:{hasRecords:returnValue.hasOwnProperty('records'),recordsInReturn:returnValue.records!==undefined,recordsLengthInReturn:returnValue.records?.length,returnKeys:Object.keys(returnValue)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
-    
+
     return returnValue;
   }
 });
