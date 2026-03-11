@@ -403,6 +403,101 @@ ON CONFLICT (id) DO UPDATE SET
   updated_at = NOW();
 
 -- ============================================
+-- 5. TABLE AO_VEILLE_RUNS (IDEMPOTENCE & OBSERVABILITÉ)
+-- ============================================
+-- Journalise les lancements du workflow de veille (par client / plage de dates)
+-- et permet de détecter les doubles déclenchements.
+
+CREATE TABLE IF NOT EXISTS ao_veille_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id TEXT NOT NULL REFERENCES clients(id),
+  since DATE NOT NULL,
+  until DATE,
+  source TEXT NOT NULL DEFAULT 'github',          -- ex: 'github', 'manual', 'internal'
+  external_run_id TEXT,                           -- ex: GitHub Run ID
+  status TEXT NOT NULL DEFAULT 'started',         -- 'started', 'completed', 'failed'
+  error TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Unicité logique : un run par client / plage / source
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ao_veille_runs_unique
+ON ao_veille_runs(client_id, since, COALESCE(until, since), source);
+
+CREATE INDEX IF NOT EXISTS idx_ao_veille_runs_client_date
+ON ao_veille_runs(client_id, since DESC);
+
+-- Activer RLS et policies basées sur service_role
+ALTER TABLE public.ao_veille_runs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "ao_veille_runs_select" ON public.ao_veille_runs;
+DROP POLICY IF EXISTS "ao_veille_runs_insert" ON public.ao_veille_runs;
+DROP POLICY IF EXISTS "ao_veille_runs_update" ON public.ao_veille_runs;
+DROP POLICY IF EXISTS "ao_veille_runs_delete" ON public.ao_veille_runs;
+
+CREATE POLICY "ao_veille_runs_select" ON public.ao_veille_runs FOR SELECT
+  USING (((select auth.jwt()) ->> 'role') = 'service_role' OR (select auth.role()) = 'authenticated');
+
+CREATE POLICY "ao_veille_runs_insert" ON public.ao_veille_runs FOR INSERT
+  WITH CHECK (((select auth.jwt()) ->> 'role') = 'service_role');
+
+CREATE POLICY "ao_veille_runs_update" ON public.ao_veille_runs FOR UPDATE
+  USING (((select auth.jwt()) ->> 'role') = 'service_role')
+  WITH CHECK (((select auth.jwt()) ->> 'role') = 'service_role');
+
+CREATE POLICY "ao_veille_runs_delete" ON public.ao_veille_runs FOR DELETE
+  USING (((select auth.jwt()) ->> 'role') = 'service_role');
+
+-- Trigger updated_at
+DROP TRIGGER IF EXISTS update_ao_veille_runs_updated_at ON ao_veille_runs;
+CREATE TRIGGER update_ao_veille_runs_updated_at
+  BEFORE UPDATE ON ao_veille_runs
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================
+-- 6. TABLE VEILLE_EMAIL_LOGS (ANTI-DUPLICATION EMAILS)
+-- ============================================
+-- Trace chaque email de veille envoyé (ou en échec) par client et par période.
+
+CREATE TABLE IF NOT EXISTS veille_email_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id TEXT NOT NULL REFERENCES clients(id),
+  since DATE NOT NULL,
+  until DATE,
+  sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  status TEXT NOT NULL DEFAULT 'sent',           -- 'sent', 'failed'
+  message_id_resend TEXT,                        -- ID de message Resend si dispo
+  payload_hash TEXT,                             -- Hash optionnel du contenu pour audit
+  run_id UUID REFERENCES ao_veille_runs(id),     -- Lien facultatif vers ao_veille_runs
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Un email unique par client / plage (indépendamment du run technique)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_veille_email_logs_unique
+ON veille_email_logs(client_id, since, COALESCE(until, since))
+WHERE status = 'sent';
+
+CREATE INDEX IF NOT EXISTS idx_veille_email_logs_client_date
+ON veille_email_logs(client_id, since DESC);
+
+ALTER TABLE public.veille_email_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "veille_email_logs_select" ON public.veille_email_logs;
+DROP POLICY IF EXISTS "veille_email_logs_insert" ON public.veille_email_logs;
+DROP POLICY IF EXISTS "veille_email_logs_delete" ON public.veille_email_logs;
+
+CREATE POLICY "veille_email_logs_select" ON public.veille_email_logs FOR SELECT
+  USING (((select auth.jwt()) ->> 'role') = 'service_role' OR (select auth.role()) = 'authenticated');
+
+CREATE POLICY "veille_email_logs_insert" ON public.veille_email_logs FOR INSERT
+  WITH CHECK (((select auth.jwt()) ->> 'role') = 'service_role');
+
+CREATE POLICY "veille_email_logs_delete" ON public.veille_email_logs FOR DELETE
+  USING (((select auth.jwt()) ->> 'role') = 'service_role');
+
+-- ============================================
 -- 6. VÉRIFICATION
 -- ============================================
 

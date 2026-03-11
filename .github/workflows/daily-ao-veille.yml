@@ -118,6 +118,9 @@ jobs:
           echo ""
           
           # Retry logic pour gérer les erreurs transitoires
+          # ⚠️ Cas particulier 524 (Cloudflare timeout) :
+          # Dans la pratique, Mastra démarre le workflow avant que Cloudflare coupe la connexion.
+          # On traite donc 524 comme un succès pour éviter les doublons d'exécution / emails.
           MAX_RETRIES=3
           RETRY_DELAY=10  # secondes
           SUCCESS=false
@@ -125,7 +128,7 @@ jobs:
           for attempt in $(seq 1 $MAX_RETRIES); do
             echo "🔄 Tentative $attempt/$MAX_RETRIES..."
             
-            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 120 -X POST \
               -H "Content-Type: application/json" \
               -H "X-GitHub-Run-Id: $RUN_ID" \
               -d "$PAYLOAD" \
@@ -136,11 +139,12 @@ jobs:
             
             echo "📊 Code HTTP: $HTTP_CODE"
             
-            # Si succès (2xx) ou erreur client (4xx), on arrête
-            if [[ "$HTTP_CODE" =~ ^2 ]]; then
-              echo "✅ Succès (code $HTTP_CODE)"
+            # Si succès (2xx) ou timeout Cloudflare 524, on considère que le workflow est lancé
+            if [[ "$HTTP_CODE" =~ ^2 ]] || [[ "$HTTP_CODE" == "524" ]]; then
+              echo "✅ Workflow lancé (code $HTTP_CODE)"
               SUCCESS=true
               break
+            # Si erreur client (4xx), on arrête sans retry
             elif [[ "$HTTP_CODE" =~ ^4 ]]; then
               echo "❌ Erreur client (code $HTTP_CODE) - Pas de retry"
               break

@@ -1117,19 +1117,49 @@ const sendEmailStep = createStep({
   }),
   execute: async ({ inputData }) => {
     // ────────────────────────────────────────────────────────────
-    // 1. VÉRIFICATION PRÉALABLE
+    // 0. ANTI-DUPLICATION EMAIL : vérifier si un email a déjà été envoyé
+    //    pour ce client et cette période (since/until ou date unique).
     // ────────────────────────────────────────────────────────────
     if (!inputData.client) {
       console.log(`⚠️ Pas de client disponible, email non envoyé`);
       return { emailSent: false };
     }
 
-    // ────────────────────────────────────────────────────────────
+    const clientId = inputData.client.id;
+
     // 2. DATE POUR L'EMAIL : plage (since→until) ou jour unique (veille)
-    // ────────────────────────────────────────────────────────────
     const { since, until } = inputData;
     const today = new Date();
     const singleDate = since || today.toISOString().split('T')[0];
+
+    // Clés normalisées pour la table veille_email_logs (DATE, pas TIMESTAMP)
+    const sinceDate = singleDate;
+    const untilDate = until || singleDate;
+
+    try {
+      const { data: existingEmail, error: emailCheckError } = await supabase
+        .from('veille_email_logs')
+        .select('id, sent_at, status')
+        .eq('client_id', clientId)
+        .eq('since', sinceDate)
+        .eq('until', untilDate)
+        .eq('status', 'sent')
+        .maybeSingle();
+
+      if (emailCheckError) {
+        console.error('⚠️ Erreur lors de la vérification des emails existants:', emailCheckError);
+      } else if (existingEmail) {
+        console.log(`⏭️ Email déjà envoyé pour ${clientId} (${sinceDate} → ${untilDate}), skip envoi.`);
+        return { emailSent: false };
+      }
+    } catch (err) {
+      console.error('⚠️ Exception lors de la vérification des emails existants:', err);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // 1. VÉRIFICATION PRÉALABLE
+    // ────────────────────────────────────────────────────────────
+    // (client déjà vérifié plus haut)
 
     // ────────────────────────────────────────────────────────────
     // 3. ORGANISATION DES DONNÉES POUR LE TEMPLATE
@@ -1219,6 +1249,27 @@ const sendEmailStep = createStep({
       // 6. ENVOI DE L'EMAIL
       // ────────────────────────────────────────────────────────────
       const result = await sendEmail(subject, htmlBody, textBody);
+
+      // Journaliser dans veille_email_logs, même en cas d'échec
+      try {
+        const { error: logError } = await supabase
+          .from('veille_email_logs')
+          .insert({
+            client_id: clientId,
+            since: sinceDate,
+            until: untilDate,
+            status: result.success ? 'sent' : 'failed',
+            message_id_resend: result.messageId || null
+          });
+
+        if (logError) {
+          console.error('⚠️ Erreur lors de l\'insertion dans veille_email_logs:', logError);
+        } else {
+          console.log(`💾 Log email veille enregistré pour ${clientId} (${sinceDate} → ${untilDate}) [status=${result.success ? 'sent' : 'failed'}]`);
+        }
+      } catch (logEx) {
+        console.error('⚠️ Exception lors du logging veille_email_logs:', logEx);
+      }
 
       if (result.success) {
         console.log(`✅ Email récapitulatif envoyé avec succès`);
