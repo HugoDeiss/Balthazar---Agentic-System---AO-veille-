@@ -178,12 +178,16 @@ Dans l'interface Mastra Cloud, configurer :
 
 Vérifier que toutes les variables nécessaires sont configurées dans Mastra Cloud :
 
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_KEY`
-- `RESEND_API_KEY`
-- `OPENAI_API_KEY` (ou autre provider AI)
-- `EMAIL_FROM` (optionnel)
-- Toutes les autres variables utilisées dans le code
+| Variable | Obligatoire | Description |
+|----------|-------------|-------------|
+| `DATABASE_URL` | ✅ Oui | Chaîne de connexion PostgreSQL (Supabase) pour pgvector (RAG) |
+| `OPENAI_API_KEY` | ✅ Oui | Clé API OpenAI (agent + embeddings) |
+| `SUPABASE_URL` | ✅ Oui | URL Supabase |
+| `SUPABASE_SERVICE_KEY` | ✅ Oui | Clé service Supabase |
+| `RESEND_API_KEY` | ✅ Oui | Clé API Resend (emails) |
+| `EMAIL_FROM` | Optionnel | Adresse expéditrice des emails |
+
+**Important** : `DATABASE_URL` est requis pour le vector store pgvector (policies, case studies). Sans elle, l'agent RAG ne peut pas s'initialiser correctement.
 
 ---
 
@@ -219,7 +223,7 @@ Vérifier que toutes les variables nécessaires sont configurées dans Mastra Cl
 - [ ] Mastra Directory : `src/mastra`
 - [ ] Install Command : `npm ci --omit=dev`
 - [ ] Build Command : `npm run build`
-- [ ] Variables d'environnement configurées
+- [ ] Variables d'environnement : `DATABASE_URL`, `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `RESEND_API_KEY` (voir section 4)
 
 ---
 
@@ -355,6 +359,18 @@ Package listé dans `bundler.externals` mais absent de `dependencies`.
 
 ---
 
+### ⚠️ Erreur 524 (Cloudflare Timeout) au déclenchement cron
+
+**Symptôme** : Le workflow GitHub reçoit un code 524 "A timeout occurred" lors de l'appel à Mastra Cloud.
+
+**Causes possibles** :
+- Code de debug laissé en prod : `fetch('http://127.0.0.1:7243/...')` dans `ao-veille.ts` ou `boamp-fetcher.ts` — **ne jamais commiter**
+- `DATABASE_URL` manquant dans Mastra Cloud (connexion pgvector bloque au démarrage)
+
+**Solution** : Supprimer toute instrumentation vers `127.0.0.1:7243`, vérifier `DATABASE_URL` dans les variables Mastra Cloud. Voir `GITHUB_WORKFLOW_QUOTIDIEN.md` section "Problème 5b".
+
+---
+
 ## 7. Checklist Complète
 
 ### 📝 Avant Chaque Déploiement
@@ -412,7 +428,9 @@ Package listé dans `bundler.externals` mais absent de `dependencies`.
 3. **package-lock.json :** Toujours synchroniser avec `npm install` après modification de `package.json`
 4. **Externals :** Tous doivent être dans `dependencies`, pas `devDependencies`
 5. **Mastra Cloud Settings :** Install Command = `npm ci --omit=dev`, Build Command = `npm run build`
-6. **Bug Connu :** Circular dependency dans bundler (signaler au support Mastra)
+6. **Variables d'environnement :** `DATABASE_URL` obligatoire pour pgvector (RAG) — sans elle, timeout 524 possible
+7. **Pas de debug en prod :** Ne jamais laisser de `fetch('http://127.0.0.1:7243/...')` dans le code
+8. **Bug Connu :** Circular dependency dans bundler (signaler au support Mastra)
 
 ---
 
@@ -424,6 +442,6 @@ Package listé dans `bundler.externals` mais absent de `dependencies`.
 
 ---
 
-**Dernière mise à jour :** Basé sur l'expérience de déploiement du 15 janvier 2025
+**Dernière mise à jour :** Mars 2026
 **Versions testées :** @mastra/core@0.24.9, mastra@0.18.9
 **Status :** Bug bundler connu, en attente de correctif Mastra

@@ -50,16 +50,45 @@ Chaque ligne de `rag/balthazar_corpus.jsonl` est un objet :
 - **metadata** : `type`, `secteur`, `decision`, `trigger_keywords`, etc.
 - **index** : `"policies"` ou `"case_studies"`.
 
-### Types de chunks policies (exemples)
+### Types de chunks policies
 
 - **sector_definition** : périmètre secteur (mobilité, énergie, assurance, secteur public).
-- **exclusion_rule** : exclusions formelles (IT, juridique, audit, formation catalogue, etc.).
-- **disambiguation_rule** : faux amis (IT vs stratégie, actuariat/rating, PAT/santé, PCAET, DSP exploitation, stratégie marketing/communication).
-- **conditional_rule** : missions acceptables sous conditions.
+- **mandate_type** : types de missions cœur (plan strat, transformation, raison d'être, RSE…).
+- **exclusion_rule** : exclusions formelles (IT, juridique, audit, formation catalogue…).
+- **disambiguation_rule** : faux amis (IT vs stratégie, actuariat/rating, PAT/santé, PCAET, DSP exploitation, stratégie marketing…).
+- **conditional_rule** : missions acceptables sous conditions (AMO, RSE, séminaire…).
+- **priority_rule** : critères de classification HAUTE/MOYENNE/BASSE/NON_PERTINENT.
 
-### Chunks de désambiguïsation (trigger proactif)
+### Chunks policies actuels (24 chunks)
 
-L'agent est instruit pour lancer des requêtes ciblées lorsque l'AO contient certains termes, afin de récupérer les bons chunks (ex. « ERP CRM transformation numérique SI exclusion » → `pol_disambiguation_it_vs_strategie`). La liste exacte des triggers est dans les instructions de l'agent (`boamp-semantic-analyzer.ts`).
+Corpus complet avec en particulier :
+- `pol_missions_coeur_strategie_identite` : plan stratégique, M&A, raison d'être, RSE
+- `pol_missions_coeur_transformation` : transformation organisationnelle, gouvernance, mobilisation CODIR
+- `pol_disambiguation_*` : 8 règles de désambiguïsation (IT, actuariat, DSP, PCAET, faux amis stratégiques, secteur public hors scope, énergie)
+
+### Case studies actuels (11 cas, condensés)
+
+Chaque cas d'étude est volontairement compact (~130 tokens) : client, secteur, type de mandat, contexte en 2 phrases. L'agent n'a besoin que de cette signature pour identifier un cas similaire.
+
+Pour modifier le corpus : éditer `rag/balthazar_corpus.jsonl`, puis transformer et ré-indexer :
+
+```bash
+python3 scripts/rag/transform-corpus.py   # optionnel, si refactoring chunks
+DATABASE_URL=... npx tsx scripts/rag/index-balthazar.ts
+```
+
+### Stratégie de retrieval (topK ciblé)
+
+L'agent est instruit pour utiliser un `topK` minimal avec `filter_type` obligatoire :
+
+| Étape | filter_type | topK |
+|-------|-------------|------|
+| Secteur | `sector_definition` | 1 |
+| Type de mission | `mandate_type` | 2 |
+| Exclusion | `exclusion_rule` | 1 |
+| Désambiguïsation | `disambiguation_rule` | **1** |
+| Priorité | `priority_rule` | 1 |
+| Cas similaire | — (`filter_secteur` obligatoire) | 2 |
 
 ### Référence métier
 
@@ -186,7 +215,7 @@ Certains termes annulent les matches sectoriels (ex. "transport" dans un context
 
 ### Concurrency LLM
 
-La directive `.foreach(processOneAOWorkflow, { concurrency: 3 })` limite à **3 appels GPT-4o simultanés**, compatible avec la limite TPM de 30 000 tokens/min (GPT-4o ≈ 10 000 tokens/appel).
+La directive `.foreach(processOneAOWorkflow, { concurrency: 2 })` limite à **2 appels GPT-4o simultanés**. Avec les optimisations RAG (topK réduit, chunks condensés, prompt user minimal), chaque appel consomme ~2 800 tokens, soit ~5 600 tokens/min — bien en deçà de la limite TPM de 30 000.
 
 ### Messages affichés dans les emails
 

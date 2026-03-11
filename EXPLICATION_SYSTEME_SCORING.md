@@ -229,9 +229,9 @@ L'analyse IA permet une **compréhension contextuelle approfondie** que les mots
 
 ### Agent IA Utilisé
 
-**Modèle** : GPT-4o-mini (OpenAI)  
+**Modèle** : GPT-4o (OpenAI)  
 **Agent spécialisé** : `boampSemanticAnalyzer`  
-**Coût** : ~0.003€ par appel d'offres analysé
+**Coût** : ~0.01–0.02€ par AO analysé (GPT-4o + appels RAG pgvector)
 
 ### Structure de l'Analyse IA
 
@@ -341,20 +341,18 @@ L'IA produit une **recommandation** finale :
 
 Le prompt envoyé à l'IA contient :
 
-1. **Few-shot examples** : 3 exemples réels d'AO Balthazar
-   - Exemple 1 : Tisséo (HAUTE_PRIORITE) - Plan stratégique + raison d'être
-   - Exemple 2 : ATMB (HAUTE_PRIORITE) - Entreprise à mission
-   - Exemple 3 : Formation Microsoft (NON_PERTINENT) - Red flag
+**System prompt (instructions de l'agent — constant)** :
+- 3 exemples de référence condensés (Tisséo HAUTE, Formation Microsoft REJECT, assurance achat contrat REJECT)
+- Règles de décision, critères PASS/REJECT, correspondance score → recommandation
+- Cartographie des chunks de désambiguïsation (termes triggers → chunk RAG à requêter)
+- Règles clients historiques, hiérarchie des sources RAG
 
-2. **Contexte keywords** : Résultats de l'analyse mots-clés
-   - Score keywords (0-100)
-   - Secteurs détectés
-   - Expertises détectées
-   - Red flags
+**User prompt (par AO — minimal)** :
+- Titre, organisme, description, keywords de l'AO
+- Pré-scoring keywords (score, confidence, secteurs détectés, red flags)
+- Instruction : « Analyse cet AO selon tes instructions. Commence par `client-history-lookup`. »
 
-3. **Données AO** : Titre, organisme, description, mots-clés
-
-4. **Instructions** : Guide de scoring détaillé avec seuils
+Cette séparation évite de répéter les instructions dans chaque message utilisateur.
 
 ### Format de Réponse Structurée
 
@@ -453,16 +451,23 @@ score_final_skip = (score_keywords / 10) × 0.7
 
 ### Priorisation
 
-Le score final détermine la **priorité** :
+Le score final détermine la **priorité de base** :
 
 - **HIGH** : Score ≥ 8/10
-  - Opportunités prioritaires à traiter en premier
-
 - **MEDIUM** : Score ≥ 6/10 et < 8/10
-  - Opportunités intéressantes à suivre
-
 - **LOW** : Score < 6/10
-  - Opportunités de faible pertinence
+
+#### Override par recommandation agent
+
+Si l'agent IA produit une vraie analyse (pas le fallback) et que sa `recommandation` est plus haute que la priorité numérique, la priorité est promue :
+
+| recommandation | priorité numérique | priorité finale |
+|----------------|--------------------|-----------------|
+| HAUTE_PRIORITE | LOW | **HIGH** |
+| MOYENNE_PRIORITE | LOW | **MEDIUM** |
+| BASSE_PRIORITE / NON_PERTINENT | — | inchangée |
+
+Cela corrige les cas où un AO borderline obtient un score numérique légèrement sous le seuil (ex. 5.8/10) mais est jugé MOYENNE_PRIORITE par l'analyse sémantique.
 
 ---
 
@@ -636,7 +641,7 @@ Le système de scoring combine :
 ## 📚 GLOSSAIRE
 
 - **AO** : Appel d'Offres
-- **LLM** : Large Language Model (modèle de langage, ici GPT-4o-mini)
+- **LLM** : Large Language Model (modèle de langage, ici GPT-4o)
 - **Skip LLM** : Décision de ne pas appeler l'IA pour économiser des coûts
 - **Fit** : Correspondance, alignement
 - **Red flag** : Signal d'alerte, indicateur de non-pertinence
@@ -645,6 +650,6 @@ Le système de scoring combine :
 
 ---
 
-**Document mis à jour :** 2025-02  
-**Version :** 1.1  
+**Document mis à jour :** 2026-03  
+**Version :** 1.2  
 **Auteur :** Système Balthazar - Agentic System

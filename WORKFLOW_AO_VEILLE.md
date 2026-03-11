@@ -42,7 +42,7 @@ export const aoVeilleWorkflow = createWorkflow({
   .map(async ({ inputData }) => {
     // Transformation pour .foreach()
   })
-  .foreach(processOneAOWorkflow, { concurrency: 10 })
+  .foreach(processOneAOWorkflow, { concurrency: 2 })
   .then(normalizeBranchResultsStep)
   .then(aggregateResultsStep)
   .then(saveResultsStep)
@@ -79,7 +79,7 @@ graph TB
     Rectifs --> Filter[filterAlreadyAnalyzedStep<br/>Évite re-analyse]
     Filter --> Keywords[keywordMatchingStep<br/>Pré-scoring mots-clés]
     Keywords --> Map[.map<br/>Transformation pour foreach]
-    Map --> Foreach[.foreach processOneAOWorkflow<br/>Traitement individuel<br/>concurrency: 10]
+    Map --> Foreach[.foreach processOneAOWorkflow<br/>Traitement individuel<br/>concurrency: 2]
     
     Foreach --> Branch1[Branch 1: AO Annulé<br/>0€ LLM]
     Foreach --> Branch2[Branch 2: Rectificatif Mineur<br/>0€ LLM]
@@ -797,15 +797,15 @@ const balthazarSemanticAnalysisSchema = z.object({
 
 ### Step 9 : scoreOneAOStep
 
-**Rôle** : Calcule le score final et détermine la priorité.
+**Rôle** : Calcule le score final et détermine la priorité — avec override basé sur la recommandation agent.
 
 #### Formule de Scoring
 
 ```typescript
 // Calcul score global (0-10)
 const keywordContribution = keywordDetails
-  ? (keywordDetails.score / 100) * 0.30  // Nouveau: 30% (0-100 → 0-10)
-  : (ao.keywordScore * 10) * 0.25;       // Ancien: 25% (backward compat)
+  ? (keywordDetails.score / 100) * 0.30  // 30% (0-100 → 0-10)
+  : (ao.keywordScore * 10) * 0.25;       // Fallback 25%
 
 const score = (
   ao.semanticScore * 0.50 +              // Pertinence: 50%
@@ -813,10 +813,17 @@ const score = (
   (1 - Math.min(ao.daysRemaining / 60, 1)) * 10 * 0.20  // Urgence: 20%
 );
 
-// Priorisation
-const priority = 
-  score >= 8 ? 'HIGH' :
-  score >= 6 ? 'MEDIUM' : 'LOW';
+// Priorité numérique de base
+const priority = score >= 8 ? 'HIGH' : score >= 6 ? 'MEDIUM' : 'LOW';
+
+// Override: si l'agent a explicitement recommandé HAUTE ou MOYENNE priorité,
+// ne pas la dégrader en LOW à cause d'un score numérique borderline.
+// Guard: s'applique uniquement aux vraies analyses (recommandation !== NON_PERTINENT et score_semantique_global > 0).
+let finalPriority = priority;
+if (isRealAnalysis && finalPriority === 'LOW') {
+  if (agentRecommandation === 'HAUTE_PRIORITE')   finalPriority = 'HIGH';
+  else if (agentRecommandation === 'MOYENNE_PRIORITE') finalPriority = 'MEDIUM';
+}
 ```
 
 #### Pondérations
@@ -827,9 +834,9 @@ const priority =
 
 #### Seuils de Priorité
 
-- **HIGH** : Score ≥ 8/10
-- **MEDIUM** : Score ≥ 6/10
-- **LOW** : Score < 6/10
+- **HIGH** : Score ≥ 8/10 — ou override si `recommandation = HAUTE_PRIORITE`
+- **MEDIUM** : Score ≥ 6/10 — ou override si `recommandation = MOYENNE_PRIORITE`
+- **LOW** : Score < 6/10 (sauf override ci-dessus)
 
 ---
 
@@ -969,6 +976,10 @@ z.object({
 - Statistiques par source (BOAMP / MarchesOnline)
 - Gestion d'erreurs gracieuse (n'interrompt pas le workflow)
 
+#### Tests locaux
+
+`RESEND_TO_OVERRIDE` : si défini dans `.env`, redirige tous les emails vers cette adresse (ex. `RESEND_TO_OVERRIDE=you@example.com`) au lieu des destinataires prod. Utile pour tester sans envoyer aux clients.
+
 ---
 
 ## 🤖 Intégration de l'Agent IA
@@ -980,7 +991,7 @@ sequenceDiagram
     participant Workflow as semanticAnalysisStep
     participant Function as analyzeSemanticRelevance
     participant Agent as boampSemanticAnalyzer
-    participant LLM as GPT-4o-mini
+    participant LLM as GPT-4o
     participant Workflow2 as Workflow (suite)
     
     Workflow->>Function: analyzeSemanticRelevance(ao, keywordDetails)
@@ -1047,7 +1058,7 @@ graph LR
 ### Niveau 2 : Semantic Analysis (Agent IA)
 
 - **Agent** : `boampSemanticAnalyzer`
-- **Modèle** : GPT-4o-mini
+- **Modèle** : GPT-4o
 - **Structured Output** : Schéma Zod avec 3 axes
 - **Score** : 0-10 (moyenne pondérée)
 - **Coût** : ~0.003€ par AO
@@ -1285,12 +1296,12 @@ console.log(`${result.llmCalls} appels LLM effectués`);
 ### Concurrence du `.foreach()`
 
 ```typescript
-.foreach(processOneAOWorkflow, { concurrency: 10 })
+.foreach(processOneAOWorkflow, { concurrency: 2 })
 ```
 
-- **Parallélisme** : 10 AO traités simultanément
-- **Rate Limiting** : Contrôle le nombre d'appels LLM simultanés
-- **Optimisation** : Équilibre vitesse / limites API OpenAI
+- **Parallélisme** : 2 AO traités simultanément
+- **Rate Limiting** : Calibré pour rester sous la limite TPM de 30 000 tokens/min (GPT-4o)
+- **Optimisation** : Avec les optimisations RAG, ~2 800 tokens/appel → ~5 600 tokens/min à concurrence 2
 
 ### Override MarchesOnline RSS
 

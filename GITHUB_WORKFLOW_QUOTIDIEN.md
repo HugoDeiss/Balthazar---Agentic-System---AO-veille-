@@ -635,6 +635,26 @@ Error: The template is not valid.
 
 ---
 
+### Problème 5b : Code HTTP 524 (Cloudflare Timeout)
+
+**Symptôme** :
+```
+❌ Le workflow a échoué avec le code HTTP: 524
+<title>mastra.cloud | 524: A timeout occurred</title>
+```
+
+**Cause** : Cloudflare coupe la connexion car l'origine (Mastra Cloud) ne répond pas dans le délai autorisé (~100 s). Causes possibles :
+- Instrumentation de debug (`fetch` vers `127.0.0.1:7243`) dans le code — **ne jamais laisser en prod**
+- Cold start Mastra trop long
+- `DATABASE_URL` manquant ou connexion pgvector lente
+
+**Solution** :
+1. Vérifier qu'aucun `fetch('http://127.0.0.1:7243/...')` ne reste dans `ao-veille.ts` ou `boamp-fetcher.ts`
+2. Vérifier que `DATABASE_URL` est configuré dans Mastra Cloud (voir `DEPLOIEMENT_MASTRA_CLOUD.md`)
+3. Consulter les logs Mastra Cloud pour erreurs au démarrage
+
+---
+
 ### Problème 6 : Réponse tronquée illisible
 
 **Symptôme** : Le preview de 4000 caractères coupe au milieu d'un objet JSON important

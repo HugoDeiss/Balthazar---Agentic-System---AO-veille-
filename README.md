@@ -401,13 +401,17 @@ cp .env.example .env
 # OpenAI
 OPENAI_API_KEY=sk-...
 
-# Supabase
+# Supabase (PostgreSQL + pgvector)
+DATABASE_URL=postgresql://...
 SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_SERVICE_KEY=eyJ...
 SUPABASE_PUBLISHABLE_KEY=eyJ...
 
-# Resend (optionnel, pour emails)
+# Resend (emails)
 RESEND_API_KEY=re_...
+
+# Tests locaux : redirige les emails vers cette adresse au lieu des destinataires prod
+# RESEND_TO_OVERRIDE=you@example.com
 ```
 
 ### Initialiser la Base de Données
@@ -419,10 +423,17 @@ RESEND_API_KEY=re_...
 
 ### Indexer le corpus RAG (analyse sémantique)
 
-L’agent de qualification s’appuie sur une base vectorielle. Après clône ou modification de `rag/balthazar_corpus.jsonl` :
+L’agent de qualification s’appuie sur une base vectorielle pgvector (Supabase). Après clône ou modification de `rag/balthazar_corpus.jsonl` :
 
 ```bash
-LIBSQL_URL=file:rag/vector.db npx tsx scripts/rag/index-balthazar.ts
+DATABASE_URL=... npx tsx scripts/rag/index-balthazar.ts
+```
+
+Pour transformer le corpus avant ré-indexation (split / condensation de chunks) :
+
+```bash
+python3 scripts/rag/transform-corpus.py
+DATABASE_URL=... npx tsx scripts/rag/index-balthazar.ts
 ```
 
 Voir [docs/RAG_ET_EVALS.md](./docs/RAG_ET_EVALS.md) pour le détail.
@@ -457,7 +468,6 @@ Le serveur Mastra démarre sur `http://localhost:4111` (port configuré dans `sr
 
 - **[RAG-Expertise-Balthazar.md](./RAG-Expertise-Balthazar.md)** — Expertise et positionnement Balthazar (source du corpus RAG)
 - **[MOTS_CLES_ANALYSE.md](./MOTS_CLES_ANALYSE.md)** — Mots-clés et analyse
-- **[nouveau-keywords.md](./nouveau-keywords.md)** — Évolution du lexique keywords
 
 ---
 
@@ -645,10 +655,10 @@ npm run test:retry:all
 ts-node scripts/test-workflow-trigger.sh
 
 # Évaluations RAG (pack synthétique 30 cas)
-LIBSQL_URL=file:rag/vector.db npx tsx evals/balthazar-scope-pack.ts
+DATABASE_URL=... npx tsx evals/balthazar-scope-pack.ts
 
 # Évaluations RAG (pack cas réels 42 cas, ~15 min)
-LIBSQL_URL=file:rag/vector.db npx tsx evals/balthazar-real-cases.ts
+DATABASE_URL=... npx tsx evals/balthazar-real-cases.ts
 ```
 
 ---
@@ -667,7 +677,7 @@ Le système log automatiquement :
 
 - **Keyword Matching** : Gratuit (0€)
 - **Semantic Analysis** : ~0.01–0.02€ par AO (GPT-4o + RAG)
-- **Coût quotidien moyen** : ~5–10€ pour 500 AO analysés
+- **Coût quotidien moyen** : ~1–3€ pour 500 AO analysés (optimisations RAG + concurrency 2)
 
 ---
 
