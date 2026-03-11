@@ -42,7 +42,7 @@ export const aoVeilleWorkflow = createWorkflow({
   .map(async ({ inputData }) => {
     // Transformation pour .foreach()
   })
-  .foreach(processOneAOWorkflow, { concurrency: 2 })
+  .foreach(processOneAOWorkflow, { concurrency: 1 })
   .then(normalizeBranchResultsStep)
   .then(aggregateResultsStep)
   .then(saveResultsStep)
@@ -79,7 +79,7 @@ graph TB
     Rectifs --> Filter[filterAlreadyAnalyzedStep<br/>Évite re-analyse]
     Filter --> Keywords[keywordMatchingStep<br/>Pré-scoring mots-clés]
     Keywords --> Map[.map<br/>Transformation pour foreach]
-    Map --> Foreach[.foreach processOneAOWorkflow<br/>Traitement individuel<br/>concurrency: 2]
+    Map --> Foreach[.foreach processOneAOWorkflow<br/>Traitement individuel<br/>concurrency: 1]
     
     Foreach --> Branch1[Branch 1: AO Annulé<br/>0€ LLM]
     Foreach --> Branch2[Branch 2: Rectificatif Mineur<br/>0€ LLM]
@@ -1291,17 +1291,48 @@ console.log(`${result.llmCalls} appels LLM effectués`);
 
 ---
 
+## 🛡️ Fiabilisation et Résilience
+
+### Gestion du rate limit (429 / TPM)
+
+L'agent `boamp-semantic-analyzer` gère explicitement les erreurs 429 (limite de tokens/minute OpenAI) :
+
+- **Détection** : `status === 429`, `code === 'rate_limit_exceeded'`, ou message contenant "rate limit", "overloaded", "tpm"
+- **Retry** : Jusqu'à 3 tentatives avec backoff aléatoire 12–20 s entre chaque
+- **Fallback** : Si échec après retries, message explicite "Limite de requêtes (TPM) dépassée — vérification humaine recommandée"
+
+Fichier : `src/mastra/agents/boamp-semantic-analyzer.ts`
+
+### Anti-duplication des emails
+
+Le step `sendEmailStep` vérifie la table `veille_email_logs` avant d'envoyer :
+
+- **Clé** : `(client_id, since, until)` — un seul email par client et par période
+- **Avant envoi** : Requête Supabase ; si un log `status='sent'` existe déjà → skip
+- **Après envoi** : Insert dans `veille_email_logs` avec `message_id_resend` (succès ou échec)
+
+Évite les doublons même si le workflow est déclenché plusieurs fois (ex. retries GitHub sur 524).
+
+### Tables Supabase (observabilité)
+
+- **`ao_veille_runs`** : Journal des lancements (client, since, until, source, status)
+- **`veille_email_logs`** : Journal des emails envoyés (client, since, until, status, message_id_resend)
+
+Migrations dans `supabase-setup.sql`.
+
+---
+
 ## 🔧 Configuration Avancée
 
 ### Concurrence du `.foreach()`
 
 ```typescript
-.foreach(processOneAOWorkflow, { concurrency: 2 })
+.foreach(processOneAOWorkflow, { concurrency: 1 })
 ```
 
-- **Parallélisme** : 2 AO traités simultanément
-- **Rate Limiting** : Calibré pour rester sous la limite TPM de 30 000 tokens/min (GPT-4o)
-- **Optimisation** : Avec les optimisations RAG, ~2 800 tokens/appel → ~5 600 tokens/min à concurrence 2
+- **Parallélisme** : 1 AO analysé par le LLM à la fois (priorité stabilité TPM)
+- **Rate Limiting** : Un seul appel LLM simultané évite les pics de tokens et les erreurs 429
+- **Vitesse** : Le cron tourne à 7h UTC ; 4 min ou 12 min n'impacte pas l'usage
 
 ### Override MarchesOnline RSS
 

@@ -356,6 +356,7 @@ echo "Vérifiez les logs ci-dessus pour plus de détails."
 |---------------|-----------|---------------|
 | ✅ Success | 200 | Workflow Mastra lancé avec succès (mode sync) |
 | ✅ Success | 202 | Workflow Mastra accepté (mode async) |
+| ✅ Success | 524 | Timeout Cloudflare — le workflow a probablement démarré côté Mastra avant la coupure. Traité comme succès pour éviter les doublons (pas de retry). |
 | ❌ Failure | 400 | Payload invalide (erreur dans les paramètres) |
 | ❌ Failure | 401 | Authentification échouée (vérifier `MASTRA_CLOUD_URL`) |
 | ❌ Failure | 404 | Endpoint introuvable (URL incorrecte) |
@@ -639,19 +640,23 @@ Error: The template is not valid.
 
 **Symptôme** :
 ```
-❌ Le workflow a échoué avec le code HTTP: 524
 <title>mastra.cloud | 524: A timeout occurred</title>
 ```
 
-**Cause** : Cloudflare coupe la connexion car l'origine (Mastra Cloud) ne répond pas dans le délai autorisé (~100 s). Causes possibles :
-- Instrumentation de debug (`fetch` vers `127.0.0.1:7243`) dans le code — **ne jamais laisser en prod**
+**Cause** : Cloudflare coupe la connexion car l'origine (Mastra Cloud) ne répond pas dans le délai autorisé (~100 s). En pratique, Mastra démarre souvent le workflow avant que la connexion soit coupée.
+
+**Comportement actuel (v4.0)** :
+- Le code **524 est traité comme succès** : on considère que le workflow a été lancé.
+- **Pas de retry** : éviter les doublons d'exécution et d'emails.
+- `--max-time 120` sur le `curl` : GitHub n'attend pas indéfiniment.
+- Le job GitHub est marqué **✅ Success** si le code est 524.
+
+**Si le workflow ne s'est pas lancé** (rare) : lancer manuellement via `workflow_dispatch` avec la même date.
+
+**Causes possibles du timeout** (pour investigation) :
 - Cold start Mastra trop long
 - `DATABASE_URL` manquant ou connexion pgvector lente
-
-**Solution** :
-1. Vérifier qu'aucun `fetch('http://127.0.0.1:7243/...')` ne reste dans `ao-veille.ts` ou `boamp-fetcher.ts`
-2. Vérifier que `DATABASE_URL` est configuré dans Mastra Cloud (voir `DEPLOIEMENT_MASTRA_CLOUD.md`)
-3. Consulter les logs Mastra Cloud pour erreurs au démarrage
+- Instrumentation de debug (`fetch` vers `127.0.0.1:7243`) — ne jamais laisser en prod
 
 ---
 
@@ -781,6 +786,23 @@ Via l'interface GitHub Actions :
 ---
 
 ## 📝 Historique des Changements
+
+### 2026-03-11 : Fiabilisation 524 + Anti-doublons (v4.0)
+
+**Problème résolu** :
+- ❌ Code 524 (Cloudflare timeout) déclenchait 3 retries → 3 workflows → 3 emails
+- ❌ Job GitHub marqué en échec alors que le workflow tournait correctement
+
+**Changements appliqués** :
+- ✅ **524 traité comme succès** : pas de retry, job GitHub vert
+- ✅ **`--max-time 120`** sur le `curl` : pas d'attente infinie
+- ✅ **Conditions des steps** : succès si 2xx ou 524, échec sinon
+
+**Impact** :
+- 🛡️ Plus de doublons d'exécution ni d'emails
+- 📊 Comportement cohérent entre GitHub et Mastra
+
+---
 
 ### 2026-02-06 : Gestion Robuste des Erreurs (v3.0)
 

@@ -257,11 +257,33 @@ export const DEFAULT_FALLBACK_ANALYSIS: BalthazarSemanticAnalysis = {
 };
 
 // ──────────────────────────────────────────────────
+// RATE LIMIT (429) DETECTION & RETRY
+// ──────────────────────────────────────────────────
+
+const MAX_RETRIES_RATE_LIMIT = 3;
+const BACKOFF_BASE_MS = 12_000;   // 12s
+const BACKOFF_JITTER_MS = 8_000;  // +0–8s aléatoire → 12–20s total
+
+/** Détecte si l'erreur provient d'un rate limit OpenAI (429 / TPM dépassé) */
+function isRateLimitError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as Record<string, unknown>;
+  const status = e.status ?? e.statusCode;
+  const code = e.code ?? (e as { error?: { code?: string } }).error?.code;
+  const msg = String(e.message ?? (e as { error?: { message?: string } }).error?.message ?? '').toLowerCase();
+  if (status === 429 || code === 'rate_limit_exceeded' || code === 'rate_limit_error') return true;
+  return /rate limit|rate_limit|overloaded|capacity|tpm|rpm/.test(msg);
+}
+
+// ──────────────────────────────────────────────────
 // FONCTION D'ANALYSE (compatible workflow)
 // ──────────────────────────────────────────────────
 
 /**
  * Analyse la pertinence sémantique d'un AO pour Balthazar (RAG-grounded)
+ *
+ * Gère explicitement les 429 (rate limit / TPM) : backoff 12–20s, jusqu'à 3 tentatives.
+ * En cas d'échec final après retries, retourne un fallback explicite "vérification humaine recommandée".
  *
  * @param ao - L'appel d'offres à analyser
  * @param keywordScore - Résultat du scoring keywords (contexte pré-scoring)
@@ -275,62 +297,81 @@ export async function analyzeSemanticRelevance(
   reason: string;
   details: BalthazarSemanticAnalysis | null;
 }> {
-  try {
-    const prompt = buildPrompt(ao, keywordScore);
+  const prompt = buildPrompt(ao, keywordScore);
+  let lastError: unknown;
 
-    let analysis: BalthazarSemanticAnalysis = DEFAULT_FALLBACK_ANALYSIS;
+  for (let attempt = 0; attempt < MAX_RETRIES_RATE_LIMIT; attempt++) {
+    try {
+      let analysis: BalthazarSemanticAnalysis = DEFAULT_FALLBACK_ANALYSIS;
 
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const response = await boampSemanticAnalyzer.generate(prompt, {
-        structuredOutput: {
-          schema: balthazarSemanticAnalysisSchema,
-          errorStrategy: 'fallback',
-          fallbackValue: DEFAULT_FALLBACK_ANALYSIS,
-        },
-      });
+      for (let parseAttempt = 0; parseAttempt < 2; parseAttempt++) {
+        const response = await boampSemanticAnalyzer.generate(prompt, {
+          structuredOutput: {
+            schema: balthazarSemanticAnalysisSchema,
+            errorStrategy: 'fallback',
+            fallbackValue: DEFAULT_FALLBACK_ANALYSIS,
+          },
+        });
 
-      const rawObject = await response.object;
-      const candidate = (rawObject ?? DEFAULT_FALLBACK_ANALYSIS) as BalthazarSemanticAnalysis;
+        const rawObject = await response.object;
+        const candidate = (rawObject ?? DEFAULT_FALLBACK_ANALYSIS) as BalthazarSemanticAnalysis;
 
-      // Detect if Mastra returned the fallback sentinel (structured output extraction failed)
-      if (candidate.rejet_raison !== 'Erreur technique — analyse impossible') {
-        analysis = candidate;
+        if (candidate.rejet_raison !== 'Erreur technique — analyse impossible') {
+          analysis = candidate;
+          break;
+        }
+        if (parseAttempt === 0) {
+          console.warn(`[analyzeSemanticRelevance] Structured output failed for "${ao.title}", retrying...`);
+          await new Promise(r => setTimeout(r, 2000));
+        } else {
+          analysis = candidate;
+        }
+      }
+
+      console.log(`[analyzeSemanticRelevance] ${ao.title}`);
+      console.log(`  → Score: ${analysis.score_semantique_global}/10`);
+      console.log(`  → Decision: ${analysis.decision_gate} | ${analysis.recommandation}`);
+      console.log(`  → Confidence: ${analysis.confidence_decision}`);
+      console.log(`  → RAG sources: ${analysis.rag_sources.join(', ') || 'none'}`);
+      if (analysis.rejet_raison) {
+        console.log(`  → Rejet: ${analysis.rejet_raison}`);
+      }
+
+      return {
+        score: analysis.score_semantique_global,
+        reason: analysis.justification_globale,
+        details: analysis,
+      };
+    } catch (error: unknown) {
+      lastError = error;
+
+      if (isRateLimitError(error) && attempt < MAX_RETRIES_RATE_LIMIT - 1) {
+        const delayMs = BACKOFF_BASE_MS + Math.random() * BACKOFF_JITTER_MS;
+        console.warn(
+          `[analyzeSemanticRelevance] Rate limit (429/TPM) pour "${ao.title}", retry dans ${Math.round(delayMs / 1000)}s (tentative ${attempt + 1}/${MAX_RETRIES_RATE_LIMIT})`
+        );
+        await new Promise(r => setTimeout(r, delayMs));
+      } else {
         break;
       }
-      if (attempt === 0) {
-        console.warn(`[analyzeSemanticRelevance] Structured output failed for "${ao.title}", retrying...`);
-        await new Promise(r => setTimeout(r, 2000));
-      } else {
-        analysis = candidate; // use fallback after 2 attempts
-      }
     }
-
-    console.log(`[analyzeSemanticRelevance] ${ao.title}`);
-    console.log(`  → Score: ${analysis.score_semantique_global}/10`);
-    console.log(`  → Decision: ${analysis.decision_gate} | ${analysis.recommandation}`);
-    console.log(`  → Confidence: ${analysis.confidence_decision}`);
-    console.log(`  → RAG sources: ${analysis.rag_sources.join(', ') || 'none'}`);
-    if (analysis.rejet_raison) {
-      console.log(`  → Rejet: ${analysis.rejet_raison}`);
-    }
-
-    return {
-      score: analysis.score_semantique_global,
-      reason: analysis.justification_globale,
-      details: analysis,
-    };
-
-  } catch (error: any) {
-    console.error('[analyzeSemanticRelevance] Error:', error.message || error);
-
-    const fallbackScore = keywordScore
-      ? ((keywordScore.adjustedScore || keywordScore.score || 0) / 100) * 0.7
-      : 0;
-
-    return {
-      score: fallbackScore,
-      reason: `Erreur analyse LLM: ${error.message}. Score basé sur keywords uniquement.`,
-      details: DEFAULT_FALLBACK_ANALYSIS,
-    };
   }
+
+  // Échec après tous les retries (rate limit ou autre)
+  console.error('[analyzeSemanticRelevance] Error (après retries):', (lastError as Error)?.message ?? lastError);
+
+  const fallbackScore = keywordScore
+    ? ((keywordScore.adjustedScore || keywordScore.score || 0) / 100) * 0.7
+    : 0;
+
+  const wasRateLimit = lastError && isRateLimitError(lastError);
+  const reasonSuffix = wasRateLimit
+    ? 'Limite de requêtes (TPM) dépassée — vérification humaine recommandée.'
+    : `${(lastError as Error)?.message ?? 'Erreur inconnue'}. Score basé sur keywords uniquement.`;
+
+  return {
+    score: fallbackScore,
+    reason: `Erreur analyse LLM: ${reasonSuffix}`,
+    details: DEFAULT_FALLBACK_ANALYSIS,
+  };
 }

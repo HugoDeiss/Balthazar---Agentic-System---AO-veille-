@@ -2195,9 +2195,9 @@ export const aoVeilleWorkflow = createWorkflow({
   // PHASE 3 : TRAITEMENT INDIVIDUEL PAR AO (LLM)
   // ═══════════════════════════════════════════════════════
   // Chaque AO est traité individuellement par le workflow imbriqué.
-  // Concurrency à 3 : GPT-4o consomme ~10K tokens/appel, limite TPM = 30K → max 3 appels simultanés.
+  // Concurrency à 1 : priorité stabilité TPM (éviter 429). Un seul AO analysé par le LLM à la fois.
   // Les AOs skippés (branch 2.5) ne consomment aucun token et ne contribuent pas à la limite.
-  .foreach(processOneAOWorkflow, { concurrency: 2 })
+  .foreach(processOneAOWorkflow, { concurrency: 1 })
   
   // ═══════════════════════════════════════════════════════
   // PHASE 3.5 : NORMALISATION DES RÉSULTATS BRANCHÉS
