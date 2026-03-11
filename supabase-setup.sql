@@ -470,14 +470,14 @@ CREATE TABLE IF NOT EXISTS veille_email_logs (
   status TEXT NOT NULL DEFAULT 'sent',           -- 'sent', 'failed'
   message_id_resend TEXT,                        -- ID de message Resend si dispo
   payload_hash TEXT,                             -- Hash optionnel du contenu pour audit
+  email_type TEXT,                               -- 'FULL', 'DELTA', 'CONFIRMATION', etc.
   run_id UUID REFERENCES ao_veille_runs(id),     -- Lien facultatif vers ao_veille_runs
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Un email unique par client / plage (indépendamment du run technique)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_veille_email_logs_unique
-ON veille_email_logs(client_id, since, COALESCE(until, since))
-WHERE status = 'sent';
+-- Index pour retrouver rapidement les envois par client/plage
+CREATE INDEX IF NOT EXISTS idx_veille_email_logs_unique
+ON veille_email_logs(client_id, since, COALESCE(until, since));
 
 CREATE INDEX IF NOT EXISTS idx_veille_email_logs_client_date
 ON veille_email_logs(client_id, since DESC);

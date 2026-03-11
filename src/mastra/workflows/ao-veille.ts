@@ -1117,8 +1117,7 @@ const sendEmailStep = createStep({
   }),
   execute: async ({ inputData }) => {
     // ────────────────────────────────────────────────────────────
-    // 0. ANTI-DUPLICATION EMAIL : vérifier si un email a déjà été envoyé
-    //    pour ce client et cette période (since/until ou date unique).
+    // 0. CONTRÔLE PRÉALABLE CLIENT
     // ────────────────────────────────────────────────────────────
     if (!inputData.client) {
       console.log(`⚠️ Pas de client disponible, email non envoyé`);
@@ -1127,7 +1126,7 @@ const sendEmailStep = createStep({
 
     const clientId = inputData.client.id;
 
-    // 2. DATE POUR L'EMAIL : plage (since→until) ou jour unique (veille)
+    // 1. DATE POUR L'EMAIL : plage (since→until) ou jour unique (veille)
     const { since, until } = inputData;
     const today = new Date();
     const singleDate = since || today.toISOString().split('T')[0];
@@ -1136,33 +1135,50 @@ const sendEmailStep = createStep({
     const sinceDate = singleDate;
     const untilDate = until || singleDate;
 
+    // 2. HISTORIQUE D'ENVOI : récupérer le dernier email envoyé pour cette plage
+    let lastSentAt: string | null = null;
     try {
-      const { data: existingEmail, error: emailCheckError } = await supabase
+      const { data: lastLogs, error: emailCheckError } = await supabase
         .from('veille_email_logs')
-        .select('id, sent_at, status')
+        .select('sent_at, email_type')
         .eq('client_id', clientId)
         .eq('since', sinceDate)
         .eq('until', untilDate)
         .eq('status', 'sent')
-        .maybeSingle();
+        .order('sent_at', { ascending: false })
+        .limit(1);
 
       if (emailCheckError) {
-        console.error('⚠️ Erreur lors de la vérification des emails existants:', emailCheckError);
-      } else if (existingEmail) {
-        console.log(`⏭️ Email déjà envoyé pour ${clientId} (${sinceDate} → ${untilDate}), skip envoi.`);
-        return { emailSent: false };
+        console.error('⚠️ Erreur lors de la lecture de veille_email_logs:', emailCheckError);
+      } else if (lastLogs && lastLogs.length > 0) {
+        lastSentAt = lastLogs[0].sent_at as string;
+        console.log(`ℹ️ Dernier email de veille envoyé pour ${clientId} (${sinceDate} → ${untilDate}) à ${lastSentAt}`);
       }
     } catch (err) {
-      console.error('⚠️ Exception lors de la vérification des emails existants:', err);
+      console.error('⚠️ Exception lors de la lecture de veille_email_logs:', err);
+    }
+
+    // Comptage des AO analysés dans CE run (nouvelles analyses uniquement)
+    const totalNewInRun = (inputData.high || 0) + (inputData.medium || 0) + (inputData.low || 0);
+
+    // Déterminer le type d'email à envoyer (par défaut FULL)
+    let emailType: 'FULL' | 'DELTA' | 'CONFIRMATION' = 'FULL';
+    if (lastSentAt) {
+      if (totalNewInRun > 0) {
+        emailType = 'DELTA';
+      } else {
+        emailType = 'CONFIRMATION';
+      }
+    }
+
+    try {
+      console.log(`📧 Type d'email de veille pour ${clientId} (${sinceDate} → ${untilDate}): ${emailType} (nouveaux AO ce run: ${totalNewInRun})`);
+    } catch (err) {
+      // Log déjà géré ci-dessus, on continue avec les valeurs par défaut
     }
 
     // ────────────────────────────────────────────────────────────
-    // 1. VÉRIFICATION PRÉALABLE
-    // ────────────────────────────────────────────────────────────
-    // (client déjà vérifié plus haut)
-
-    // ────────────────────────────────────────────────────────────
-    // 3. ORGANISATION DES DONNÉES POUR LE TEMPLATE
+    // 3. ORGANISATION DES DONNÉES POUR LE TEMPLATE (AOs de CE run)
     // ────────────────────────────────────────────────────────────
     // Combiner HIGH et MEDIUM de toutes les sources
     const relevantAOs: EmailData['relevantAOs'] = [];
@@ -1218,11 +1234,29 @@ const sendEmailStep = createStep({
       });
     });
 
-    // Déterminer la raison si aucun AO analysé
+    // Déterminer la raison si aucun AO analysé dans ce run
     let noAOsReason: string | undefined;
     const totalAnalyzed = inputData.statsBySource.BOAMP.total + inputData.statsBySource.MARCHESONLINE.total;
     if (totalAnalyzed === 0) {
       noAOsReason = 'Aucun appel d\'offres n\'a été trouvé pour cette date, ou tous les AO ont été filtrés (déjà analysés, annulés, etc.).';
+    }
+
+    // Adapter le contenu de l'email selon le type détecté
+    if (emailType === 'CONFIRMATION') {
+      // Aucun nouvel AO dans ce run et un email a déjà été envoyé pour cette plage :
+      // on envoie un email court de confirmation sans lister d\'AO.
+      console.log(`ℹ️ Email de confirmation: aucun nouvel AO pour ${clientId} (${sinceDate} → ${untilDate}) depuis le dernier envoi.`);
+      noAOsReason = `Tous les appels d'offres de la plage ${sinceDate}${until ? ' → ' + untilDate : ''} ont déjà été analysés. Aucun nouvel AO depuis le dernier envoi.`;
+      relevantAOs.length = 0;
+      lowPriorityAOs.length = 0;
+    } else if (emailType === 'DELTA') {
+      // Email de delta: les AOs présents dans ce run sont, par construction, de nouveaux AOs
+      // (les AOs déjà analysés ont été skippés par filterAlreadyAnalyzedStep).
+      console.log(`ℹ️ Email DELTA: ${totalNewInRun} nouvel(aux) AO pour ${clientId} (${sinceDate} → ${untilDate}).`);
+      // Optionnel: on pourrait enrichir l'email avec une mention explicite dans le template.
+    } else {
+      // Premier envoi (FULL)
+      console.log(`ℹ️ Email FULL: premier envoi de veille pour ${clientId} sur la plage ${sinceDate} → ${untilDate}.`);
     }
 
     // ────────────────────────────────────────────────────────────
@@ -1259,7 +1293,8 @@ const sendEmailStep = createStep({
             since: sinceDate,
             until: untilDate,
             status: result.success ? 'sent' : 'failed',
-            message_id_resend: result.messageId || null
+            message_id_resend: result.messageId || null,
+            email_type: emailType
           });
 
         if (logError) {
