@@ -121,6 +121,9 @@ jobs:
           # ⚠️ Cas particulier 524 (Cloudflare timeout) :
           # Dans la pratique, Mastra démarre le workflow avant que Cloudflare coupe la connexion.
           # On traite donc 524 comme un succès pour éviter les doublons d'exécution / emails.
+          # ⚠️ Cas particulier curl exit 28 (timeout client) :
+          # Si curl dépasse --max-time sans recevoir de réponse complète, on mappe ce cas sur 524
+          # pour garder un comportement cohérent (workflow probablement lancé, pas de retry).
           MAX_RETRIES=3
           RETRY_DELAY=10  # secondes
           SUCCESS=false
@@ -128,14 +131,25 @@ jobs:
           for attempt in $(seq 1 $MAX_RETRIES); do
             echo "🔄 Tentative $attempt/$MAX_RETRIES..."
             
+            # Désactiver temporairement 'exit on error' pour capturer proprement le code retour de curl
+            set +e
             RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 120 -X POST \
               -H "Content-Type: application/json" \
               -H "X-GitHub-Run-Id: $RUN_ID" \
               -d "$PAYLOAD" \
               ${{ secrets.MASTRA_CLOUD_URL }}/api/workflows/aoVeilleWorkflow/start-async)
+            CURL_EXIT=$?
+            set -e
             
             HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
             BODY=$(echo "$RESPONSE" | sed '$d')
+            
+            # Si curl a échoué (ex: exit 28) et qu'aucun code HTTP n'a été capturé,
+            # on considère cela comme un timeout équivalent à un 524 (Cloudflare timeout).
+            if [ "$CURL_EXIT" -ne 0 ] && [ -z "$HTTP_CODE" ]; then
+              echo "⚠️  curl a échoué avec le code $CURL_EXIT (timeout probable) — mappé en 524."
+              HTTP_CODE="524"
+            fi
             
             echo "📊 Code HTTP: $HTTP_CODE"
             

@@ -104,8 +104,8 @@ export async function isAOAlreadyAnalyzed(source: string, sourceId: string): Pro
 
 /**
  * Vérifie en batch quels AO sont déjà analysés (optimisation)
- * Une seule requête DB au lieu de N requêtes individuelles
- * 
+ * Une seule requête DB par source au lieu de N requêtes individuelles.
+ *
  * @param aos - Tableau d'AO avec source et source_id
  * @returns Map<source_id, boolean> indiquant si chaque AO est déjà analysé
  */
@@ -114,39 +114,56 @@ export async function checkBatchAlreadyAnalyzed(
 ): Promise<Map<string, boolean>> {
   const supabase = getSupabaseClient();
   const result = new Map<string, boolean>();
-  
+
   if (aos.length === 0) {
     return result;
   }
-  
-  // Récupérer tous les source_id uniques
-  const sourceIds = [...new Set(aos.map(ao => ao.source_id))];
-  const source = aos[0]?.source || 'BOAMP'; // Tous les AO ont la même source
-  
-  // Requête batch : récupérer tous les AO déjà analysés pour ces source_id
-  const { data, error } = await supabase
-    .from('appels_offres')
-    .select('source_id, status, analyzed_at')
-    .eq('source', source)
-    .in('source_id', sourceIds)
-    .eq('status', 'analyzed')
-    .not('analyzed_at', 'is', null);
-  
-  if (error) {
-    console.warn(`⚠️ Erreur vérification batch AO:`, error);
-    // En cas d'erreur, on considère tous comme non analysés (sécurité)
-    sourceIds.forEach(id => result.set(id, false));
-    return result;
-  }
-  
-  // Construire la map : source_id -> true si analysé
-  const analyzedIds = new Set((data || []).map(ao => ao.source_id));
-  
-  // Initialiser tous à false, puis marquer ceux qui sont analysés
+
+  // Initialiser tous les AO à false (par défaut: non analysés)
   aos.forEach(ao => {
-    result.set(ao.source_id, analyzedIds.has(ao.source_id));
+    if (!result.has(ao.source_id)) {
+      result.set(ao.source_id, false);
+    }
   });
-  
+
+  // Regrouper par source pour interroger la DB source par source
+  const bySource = new Map<string, string[]>();
+  for (const ao of aos) {
+    const source = ao.source || 'BOAMP';
+    if (!bySource.has(source)) {
+      bySource.set(source, []);
+    }
+    bySource.get(source)!.push(ao.source_id);
+  }
+
+  // Pour chaque source, récupérer les AO déjà analysés en une seule requête
+  for (const [source, ids] of bySource.entries()) {
+    const sourceIds = [...new Set(ids)];
+
+    const { data, error } = await supabase
+      .from('appels_offres')
+      .select('source_id, status, analyzed_at')
+      .eq('source', source)
+      .in('source_id', sourceIds)
+      .eq('status', 'analyzed')
+      .not('analyzed_at', 'is', null);
+
+    if (error) {
+      console.warn(`⚠️ Erreur vérification batch AO (source=${source}):`, error);
+      // En cas d'erreur sur une source, on garde les valeurs par défaut (false) pour ces IDs
+      continue;
+    }
+
+    const analyzedIds = new Set((data || []).map(ao => ao.source_id));
+
+    // Mettre à jour la map globale : source_id -> true si analysé
+    sourceIds.forEach(id => {
+      if (analyzedIds.has(id)) {
+        result.set(id, true);
+      }
+    });
+  }
+
   return result;
 }
 
