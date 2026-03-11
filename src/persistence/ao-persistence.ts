@@ -105,14 +105,17 @@ export async function isAOAlreadyAnalyzed(source: string, sourceId: string): Pro
 /**
  * Vérifie en batch quels AO sont déjà analysés (optimisation)
  * Une seule requête DB par source au lieu de N requêtes individuelles.
+ * Utilise aussi uuid_procedure comme fallback pour les AO dont le source_id peut varier (ex: MarchesOnline).
  *
- * @param aos - Tableau d'AO avec source et source_id
+ * @param aos - Tableau d'AO avec source, source_id et optionnellement uuid_procedure
+ * @param options - supabaseClient pour réutiliser le même client que la sauvegarde (évite décalage/RLS)
  * @returns Map<source_id, boolean> indiquant si chaque AO est déjà analysé
  */
 export async function checkBatchAlreadyAnalyzed(
-  aos: Array<{ source: string; source_id: string }>
+  aos: Array<{ source: string; source_id: string; uuid_procedure?: string | null }>,
+  options?: { supabaseClient?: SupabaseClient }
 ): Promise<Map<string, boolean>> {
-  const supabase = getSupabaseClient();
+  const supabase = options?.supabaseClient ?? getSupabaseClient();
   const result = new Map<string, boolean>();
 
   if (aos.length === 0) {
@@ -126,7 +129,8 @@ export async function checkBatchAlreadyAnalyzed(
     }
   });
 
-  // Regrouper par source pour interroger la DB source par source
+  // 1. Requête par (source, source_id)
+  // Critère: status='analyzed' ET analyzed_at non null
   const bySource = new Map<string, string[]>();
   for (const ao of aos) {
     const source = ao.source || 'BOAMP';
@@ -136,7 +140,6 @@ export async function checkBatchAlreadyAnalyzed(
     bySource.get(source)!.push(ao.source_id);
   }
 
-  // Pour chaque source, récupérer les AO déjà analysés en une seule requête
   for (const [source, ids] of bySource.entries()) {
     const sourceIds = [...new Set(ids)];
 
@@ -150,18 +153,49 @@ export async function checkBatchAlreadyAnalyzed(
 
     if (error) {
       console.warn(`⚠️ Erreur vérification batch AO (source=${source}):`, error);
-      // En cas d'erreur sur une source, on garde les valeurs par défaut (false) pour ces IDs
       continue;
     }
 
     const analyzedIds = new Set((data || []).map(ao => ao.source_id));
-
-    // Mettre à jour la map globale : source_id -> true si analysé
     sourceIds.forEach(id => {
       if (analyzedIds.has(id)) {
         result.set(id, true);
       }
     });
+  }
+
+  // 2. Fallback par uuid_procedure pour les AO non trouvés (source_id peut varier entre fetches)
+  const aosWithUuid = aos.filter(ao => {
+    const uuid = ao.uuid_procedure?.trim?.() || (ao as any).raw_json?.uuid_procedure;
+    return uuid && !result.get(ao.source_id);
+  });
+  if (aosWithUuid.length > 0) {
+    const uuids = [...new Set(aosWithUuid.map(ao => (ao.uuid_procedure?.trim?.() || (ao as any).raw_json?.uuid_procedure)?.toLowerCase?.()))].filter(Boolean);
+    if (uuids.length > 0) {
+      const { data: uuidData, error: uuidError } = await supabase
+        .from('appels_offres')
+        .select('uuid_procedure, source_id')
+        .in('uuid_procedure', uuids)
+        .eq('status', 'analyzed')
+        .not('analyzed_at', 'is', null);
+
+      if (!uuidError && uuidData && uuidData.length > 0) {
+        const analyzedUuids = new Set(uuidData.map(r => (r.uuid_procedure as string)?.toLowerCase?.()).filter(Boolean));
+        aosWithUuid.forEach(ao => {
+          const uuid = (ao.uuid_procedure?.trim?.() || (ao as any).raw_json?.uuid_procedure)?.toLowerCase?.();
+          if (uuid && analyzedUuids.has(uuid)) {
+            result.set(ao.source_id, true);
+          }
+        });
+      }
+    }
+  }
+
+  const foundCount = [...result.values()].filter(Boolean).length;
+  console.log(`🔍 checkBatchAlreadyAnalyzed: ${foundCount}/${aos.length} AO déjà analysés trouvés en DB`);
+  if (foundCount === 0 && aos.length > 0) {
+    const sampleIds = aos.slice(0, 3).map(a => `${a.source}:${a.source_id}`);
+    console.log(`   ⚠️ Aucun trouvé — ex. IDs recherchés: ${sampleIds.join(', ')}${aos.length > 3 ? '...' : ''}`);
   }
 
   return result;

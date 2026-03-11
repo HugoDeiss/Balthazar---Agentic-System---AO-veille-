@@ -588,11 +588,15 @@ const filterAlreadyAnalyzedStep = createStep({
     console.log(`🔍 Vérification des AO déjà analysés (${toAnalyze.length} AO)...`);
     
     // Vérification en batch pour optimiser (une seule requête DB)
+    // Utilise le MÊME client Supabase que la sauvegarde pour éviter tout décalage de connexion
+    // uuid_procedure utilisé comme fallback quand source_id peut varier (ex: MarchesOnline)
     const alreadyAnalyzedMap = await checkBatchAlreadyAnalyzed(
       toAnalyze.map(ao => ({
         source: ao.source || 'BOAMP',
-        source_id: ao.source_id
-      }))
+        source_id: ao.source_id,
+        uuid_procedure: ao.raw_json?.uuid_procedure ?? null
+      })),
+      { supabaseClient: supabase }
     );
     
     const filteredAOs: typeof toAnalyze = [];
@@ -978,7 +982,7 @@ const saveResultsStep = createStep({
         siret: ao.raw_json?.metadata?.siret || null
       });
       
-      await supabase.from('appels_offres').upsert({
+      const { error: upsertError } = await supabase.from('appels_offres').upsert({
         // Identifiants
         source: ao.source,
         source_id: ao.source_id,
@@ -1042,6 +1046,11 @@ const saveResultsStep = createStep({
       }, {
         onConflict: 'source_id'
       });
+
+      if (upsertError) {
+        console.error(`❌ Erreur sauvegarde AO ${ao.source_id} (${ao.source}):`, upsertError);
+        throw new Error(`Échec sauvegarde AO ${ao.source_id}: ${upsertError.message}`);
+      }
     }
     
     console.log(`✅ Sauvegarde terminée: ${scored.length} AO`);
