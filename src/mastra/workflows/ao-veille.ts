@@ -143,11 +143,7 @@ const fetchAndPrequalifyStep = createStep({
   }),
   execute: async ({ inputData, requestContext }) => {
     const client = await getClient(inputData.clientId);
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ao-veille.ts:130',message:'Before BOAMP fetch',data:{clientId:inputData.clientId,since:inputData.since,typeMarche:client.preferences.typeMarche},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-    
+
     // 1️⃣ Fetch BOAMP (filtrage structurel côté API)
     let boampData: any;
     try {
@@ -168,26 +164,12 @@ const fetchAndPrequalifyStep = createStep({
         status: string;
         records: CanonicalAO[];
       };
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ao-veille.ts:148',message:'BOAMP fetch successful',data:{boampDataExists:!!boampData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
     } catch (error: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ao-veille.ts:151',message:'BOAMP fetch error',data:{errorMessage:error?.message,errorStack:error?.stack,errorName:error?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
       throw error;
     }
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ao-veille.ts:149',message:'After BOAMP fetch - check boampData',data:{boampDataIsNull:boampData===null,boampDataIsUndefined:boampData===undefined,boampDataType:typeof boampData,boampDataKeys:boampData?Object.keys(boampData):null,hasRecords:boampData?.hasOwnProperty('records'),recordsIsUndefined:boampData?.records===undefined,recordsIsNull:boampData?.records===null,recordsType:typeof boampData?.records,recordsIsArray:Array.isArray(boampData?.records)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C'})}).catch(()=>{});
-    // #endregion
-    
+
     // Vérifier si le tool a retourné une erreur au lieu de la structure attendue
     if (boampData && (boampData.error || boampData.message || boampData.validationErrors)) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ao-veille.ts:165',message:'BOAMP tool returned error object',data:{error:boampData.error,message:boampData.message,validationErrors:boampData.validationErrors},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       const errorMessage = boampData.message || boampData.error || 'Unknown error from BOAMP fetcher';
       const validationErrors = boampData.validationErrors ? JSON.stringify(boampData.validationErrors) : '';
       throw new Error(`BOAMP fetcher tool error: ${errorMessage}${validationErrors ? ` - Validation errors: ${validationErrors}` : ''}`);
@@ -195,9 +177,6 @@ const fetchAndPrequalifyStep = createStep({
     
     // Initialiser records à un tableau vide si undefined
     if (!boampData.records) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ao-veille.ts:172',message:'Initializing empty records array',data:{boampDataExists:!!boampData},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       boampData.records = [];
       boampData.total_count = 0;
       boampData.fetched = 0;
@@ -213,11 +192,7 @@ const fetchAndPrequalifyStep = createStep({
         };
       }
     }
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/2a7a9442-8c95-4d87-9e14-186d0a65ac12',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ao-veille.ts:190',message:'Before accessing records.length',data:{boampDataExists:!!boampData,recordsExists:!!boampData?.records,recordsLength:boampData?.records?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
-    
+
     console.log(`📥 BOAMP Fetch: ${boampData.records.length} AO récupérés`);
     console.log(`📊 Total disponible: ${boampData.total_count}`);
     console.log(`📅 Date cible: ${boampData.query.since}`);
@@ -1141,37 +1116,6 @@ const sendEmailStep = createStep({
     emailSent: z.boolean()
   }),
   execute: async ({ inputData }) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/47047336-9ba9-46bc-8514-68d0aeb42d2c', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '468a95'
-      },
-      body: JSON.stringify({
-        sessionId: '468a95',
-        runId: 'pre-fix',
-        hypothesisId: 'A',
-        location: 'ao-veille.ts:send-email',
-        message: 'Entering sendEmailStep',
-        data: {
-          clientId: inputData.client?.id ?? null,
-          clientEmail: inputData.client?.email ?? null,
-          saved: inputData.saved,
-          high: inputData.high,
-          medium: inputData.medium,
-          low: inputData.low,
-          cancelled: inputData.cancelled,
-          llmCalls: inputData.llmCalls,
-          since: inputData.since ?? null,
-          until: inputData.until ?? null,
-          statsBySource: inputData.statsBySource
-        },
-        timestamp: Date.now()
-      })
-    }).catch(() => {});
-    // #endregion
-
     // ────────────────────────────────────────────────────────────
     // 1. VÉRIFICATION PRÉALABLE
     // ────────────────────────────────────────────────────────────
