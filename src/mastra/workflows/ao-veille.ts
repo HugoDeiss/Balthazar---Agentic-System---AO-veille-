@@ -759,6 +759,34 @@ const keywordMatchingStep = createStep({
 });
 
 // ──────────────────────────────────────────────────
+// STEP 2b: PRÉPARATION POUR .foreach() (préserve client si 0 AO)
+// ──────────────────────────────────────────────────
+// Quand keywordMatched est vide, on injecte un item placeholder pour que le client
+// soit propagé jusqu'à aggregate/sendEmail et qu'un email CONFIRMATION puisse être envoyé.
+const prepareForForeachStep = createStep({
+  id: 'prepare-for-foreach',
+  inputSchema: z.object({
+    keywordMatched: z.array(z.any()),
+    client: clientSchema,
+    since: z.string().optional(),
+    until: z.string().optional()
+  }),
+  outputSchema: z.array(z.object({
+    ao: z.any(),
+    client: clientSchema
+  })),
+  execute: async ({ inputData }) => {
+    const { keywordMatched, client, since, until } = inputData;
+    const clientWithDateRange = { ...client, _dateRange: since && until ? { since, until } : undefined } as any;
+    if (keywordMatched.length === 0) {
+      console.log(`📋 Aucun AO à traiter — injection d'un item contexte pour préserver le client (email CONFIRMATION si besoin)`);
+      return [{ ao: { _contextOnly: true }, client: clientWithDateRange }];
+    }
+    return keywordMatched.map(ao => ({ ao, client: clientWithDateRange }));
+  }
+});
+
+// ──────────────────────────────────────────────────
 // STEP 5: SAUVEGARDE RÉSULTATS
 // ──────────────────────────────────────────────────
 const saveResultsStep = createStep({
@@ -1336,6 +1364,25 @@ const sendEmailStep = createStep({
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ──────────────────────────────────────────────────
+// BRANCH 0 : ITEM CONTEXTE SEUL (tous AO filtrés, préserver client pour email)
+// ──────────────────────────────────────────────────
+const handleContextOnlyAOStep = createStep({
+  id: 'handle-context-only-ao',
+  inputSchema: z.object({
+    ao: z.any(),
+    client: clientSchema
+  }),
+  outputSchema: z.object({
+    ao: z.any(),
+    client: clientSchema
+  }),
+  execute: async ({ inputData }) => {
+    const { ao, client } = inputData;
+    console.log(`📋 Item contexte seul (tous AO déjà analysés) — passage pour email CONFIRMATION`);
+    return { ao, client };
+  }
+});
+
 // BRANCH 1 : GESTION D'UN AO ANNULÉ
 // ──────────────────────────────────────────────────
 const handleCancellationAOStep = createStep({
@@ -1826,6 +1873,19 @@ const processOneAOWorkflow = createWorkflow({
   // Ordre important : du plus bloquant au plus coûteux
   .branch([
     // ────────────────────────────────────────────────────
+    // BRANCH 0 : CONTEXTE SEUL (tous AO filtrés, pas d'AO à traiter)
+    // ────────────────────────────────────────────────────
+    [
+      async ({ inputData }) => {
+        const isContextOnly = (inputData.ao as any)?._contextOnly === true;
+        if (isContextOnly) {
+          console.log(`🔀 Branch 0: CONTEXTE SEUL (tous AO filtrés)`);
+        }
+        return isContextOnly;
+      },
+      handleContextOnlyAOStep
+    ],
+    // ────────────────────────────────────────────────────
     // BRANCH 1 : AO ANNULÉ
     // ────────────────────────────────────────────────────
     // Critère : etat === 'AVIS_ANNULE' ou nature_label/nature contient "annulation"
@@ -1940,6 +2000,9 @@ const normalizeBranchResultsStep = createStep({
     return inputData.map((branchResult: any) => {
       // Le workflow branché retourne un objet avec des clés de branches
       // On extrait le résultat de la première branche qui existe
+      if (branchResult['handle-context-only-ao']) {
+        return branchResult['handle-context-only-ao'];
+      }
       if (branchResult['handle-skip-llm-ao']) {
         return branchResult['handle-skip-llm-ao'];
       }
@@ -2061,15 +2124,15 @@ const aggregateResultsStep = createStep({
     }
     
     // ────────────────────────────────────────────────────────────
-    // 2. EXTRACTION : Récupérer tous les AO du tableau
+    // 2. EXTRACTION : Récupérer tous les AO du tableau (exclure placeholders _contextOnly)
     // ────────────────────────────────────────────────────────────
-    const allAOs = inputData.map(item => item.ao);
+    const allAOs = inputData.map(item => item.ao).filter(ao => !(ao as any)._contextOnly);
     
     // ────────────────────────────────────────────────────────────
     // 3. RÉCUPÉRATION DU CLIENT ET DE LA PLAGE DE DATES
     // ────────────────────────────────────────────────────────────
-    const client = inputData[0].client;
-    const dateRange = (client as any)._dateRange;
+    const client = inputData[0]?.client;
+    const dateRange = (client as any)?._dateRange;
     const since = dateRange?.since;
     const until = dateRange?.until;
     
@@ -2148,7 +2211,7 @@ const aggregateResultsStep = createStep({
     // ────────────────────────────────────────────────────────────
     // 5. LOGS RÉCAPITULATIFS
     // ────────────────────────────────────────────────────────────
-    console.log(`✅ Agrégation terminée pour le client ${client.name}`);
+    console.log(`✅ Agrégation terminée pour le client ${client?.name ?? 'N/A'}`);
     console.log(`   📊 Total: ${total} AO traités`);
     console.log(`   ✅ Analysés: ${analysed} AO`);
     console.log(`   ❌ Annulés: ${cancelledCount} AO`);
@@ -2225,15 +2288,8 @@ export const aoVeilleWorkflow = createWorkflow({
   // ═══════════════════════════════════════════════════════
   // PHASE 2 : TRANSFORMATION POUR .foreach()
   // ═══════════════════════════════════════════════════════
-  // Transformer l'objet { keywordMatched: [...], client: {...} }
-  // en tableau pur [{ ao: AO1, client }, { ao: AO2, client }, ...]
-  // pour permettre l'utilisation de .foreach()
-  .map(async ({ inputData }) => {
-    const { keywordMatched, client, since, until } = inputData;
-    // Stocker since/until dans client pour propagation (foreach ne transmet pas les champs supplémentaires)
-    const clientWithDateRange = { ...client, _dateRange: since && until ? { since, until } : undefined } as any;
-    return keywordMatched.map(ao => ({ ao, client: clientWithDateRange }));
-  })
+  // Si keywordMatched vide, injecte un item contexte pour préserver le client (email CONFIRMATION)
+  .then(prepareForForeachStep)
   
   // ═══════════════════════════════════════════════════════
   // PHASE 3 : TRAITEMENT INDIVIDUEL PAR AO (LLM)

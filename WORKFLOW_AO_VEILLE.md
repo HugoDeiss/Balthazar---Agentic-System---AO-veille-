@@ -39,9 +39,7 @@ export const aoVeilleWorkflow = createWorkflow({
   .then(detectRectificationStep)
   .then(filterAlreadyAnalyzedStep)
   .then(keywordMatchingStep)
-  .map(async ({ inputData }) => {
-    // Transformation pour .foreach()
-  })
+  .then(prepareForForeachStep)   // Si 0 AO : injecte un item contexte pour préserver le client (email CONFIRMATION)
   .foreach(processOneAOWorkflow, { concurrency: 1 })
   .then(normalizeBranchResultsStep)
   .then(aggregateResultsStep)
@@ -55,8 +53,8 @@ export const aoVeilleWorkflow = createWorkflow({
 1. **`createWorkflow`** : Création du workflow principal avec schémas Zod
 2. **`createStep`** : Création de steps individuels avec validation entrée/sortie
 3. **`.then()`** : Enchaînement séquentiel des steps
-4. **`.map()`** : Transformation des données entre steps
-5. **`.foreach()`** : Traitement parallèle avec workflow imbriqué
+4. **`prepareForForeachStep`** : Transformation pour `.foreach()` ; si 0 AO, injecte un item contexte pour préserver le client (email CONFIRMATION)
+5. **`.foreach()`** : Traitement parallèle avec workflow imbriqué (concurrency: 1)
 6. **`.branch()`** : Branching conditionnel dans le workflow imbriqué
 
 ### Flux de Données Typé
@@ -78,15 +76,17 @@ graph TB
     Cancellations --> Rectifs[detectRectificationStep<br/>Détecte rectificatifs]
     Rectifs --> Filter[filterAlreadyAnalyzedStep<br/>Évite re-analyse]
     Filter --> Keywords[keywordMatchingStep<br/>Pré-scoring mots-clés]
-    Keywords --> Map[.map<br/>Transformation pour foreach]
-    Map --> Foreach[.foreach processOneAOWorkflow<br/>Traitement individuel<br/>concurrency: 1]
+    Keywords --> Prepare[prepareForForeachStep<br/>Si 0 AO: item contexte]
+    Prepare --> Foreach[.foreach processOneAOWorkflow<br/>Traitement individuel<br/>concurrency: 1]
     
+    Foreach --> Branch0[Branch 0: Contexte seul<br/>0€ LLM]
     Foreach --> Branch1[Branch 1: AO Annulé<br/>0€ LLM]
     Foreach --> Branch2[Branch 2: Rectificatif Mineur<br/>0€ LLM]
     Foreach --> Branch3[Branch 2.5: Skip LLM<br/>0€ LLM]
     Foreach --> Branch4[Branch 3/4: Analyse Complète<br/>1 appel LLM]
     
-    Branch1 --> Normalize[normalizeBranchResultsStep<br/>Normalisation résultats]
+    Branch0 --> Normalize[normalizeBranchResultsStep<br/>Normalisation résultats]
+    Branch1 --> Normalize
     Branch2 --> Normalize
     Branch3 --> Normalize
     Branch4 --> Normalize
@@ -1312,6 +1312,15 @@ Le step `sendEmailStep` vérifie la table `veille_email_logs` avant d'envoyer :
 - **Après envoi** : Insert dans `veille_email_logs` avec `message_id_resend` (succès ou échec)
 
 Évite les doublons même si le workflow est déclenché plusieurs fois (ex. retries GitHub sur 524).
+
+### Cas 0 AO (email CONFIRMATION)
+
+Quand aucun AO ne passe le filtre mots-clés (`keywordMatched` vide), le workflow doit quand même pouvoir envoyer un email au client (ex. "Aucun AO pertinent cette période"). Pour cela :
+
+- **`prepareForForeachStep`** : Si la liste des AO à traiter est vide, injecte un item **contexte seul** `[{ ao: { _contextOnly: true }, client }]` afin que le `.foreach()` ait au moins une itération avec le client.
+- **Branche 0** : Dans `processOneAOWorkflow`, l’item avec `_contextOnly` est détecté et renvoie directement un résultat sans appel LLM (Branch 0).
+- **Agrégat** : `normalizeBranchResultsStep` (ou l’agrégat en amont) filtre ces placeholders : `allAOs = inputData.map(item => item.ao).filter(ao => !(ao as any)._contextOnly)`.
+- **Email** : `sendEmailStep` reçoit une liste d’AO vide mais un client valide, et envoie un email de type **CONFIRMATION** (aucun AO pertinent) au lieu d’un récapitulatif avec AO.
 
 ### Tables Supabase (observabilité)
 

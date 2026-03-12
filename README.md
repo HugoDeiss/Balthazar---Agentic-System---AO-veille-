@@ -461,7 +461,7 @@ Le serveur Mastra démarre sur `http://localhost:4111` (port configuré dans `sr
 ### Déploiement et automatisation
 
 - **[GITHUB_WORKFLOW_QUOTIDIEN.md](./GITHUB_WORKFLOW_QUOTIDIEN.md)** — Déclenchement quotidien (GitHub Actions)
-- **[CHECKLIST_PRE_PUSH_WORKFLOW.md](./CHECKLIST_PRE_PUSH_WORKFLOW.md)** — Checklist avant modification du workflow GitHub
+- **[docs/TESTS_AVANT_COMMIT.md](./docs/TESTS_AVANT_COMMIT.md)** — Tests et checklist avant commit / modification du workflow
 - **[DEPLOIEMENT_MASTRA_CLOUD.md](./DEPLOIEMENT_MASTRA_CLOUD.md)** — Déploiement Mastra Cloud
 
 ### Référence métier
