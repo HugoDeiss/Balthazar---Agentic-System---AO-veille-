@@ -55,6 +55,31 @@ jobs:
             echo "enabled=false" >> $GITHUB_OUTPUT
           fi
       
+      - name: 🔥 Warm up Mastra pod
+        run: |
+          echo "Waking up Mastra pod..."
+          MAX_WAIT=60
+          INTERVAL=5
+          ELAPSED=0
+          
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+              ${{ secrets.MASTRA_CLOUD_URL }}/api/workflows)
+            
+            if [[ "$HTTP_CODE" =~ ^2 ]]; then
+              echo "✅ Pod ready (HTTP $HTTP_CODE) after ${ELAPSED}s"
+              break
+            fi
+            
+            echo "⏳ Pod not ready yet (HTTP $HTTP_CODE), waiting ${INTERVAL}s... (${ELAPSED}s elapsed)"
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+          
+          if [ $ELAPSED -ge $MAX_WAIT ]; then
+            echo "⚠️ Pod did not respond in ${MAX_WAIT}s, proceeding anyway..."
+          fi
+      
       - name: 🚀 Déclencher le workflow AO Veille
         id: trigger
         run: |
@@ -133,7 +158,7 @@ jobs:
             
             # Désactiver temporairement 'exit on error' pour capturer proprement le code retour de curl
             set +e
-            RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 120 -X POST \
+            RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 30 -X POST \
               -H "Content-Type: application/json" \
               -H "X-GitHub-Run-Id: $RUN_ID" \
               -d "$PAYLOAD" \
