@@ -1657,7 +1657,11 @@ const analyzeOneAOSemanticStep = createStep({
     if (keywordDetails) {
       const skipDecision = shouldSkipLLM(keywordDetails);
       if (skipDecision.skip) {
-        console.log(`[ao-veille] LLM gate: skip "${ao.title}" — kwScore: ${keywordDetails.adjustedScore ?? keywordDetails.score}/100 (${skipDecision.reason})`);
+        console.log(
+          `[ao-veille] LLM gate: skip LLM pour "${ao.title}" — kwScore: ${
+            keywordDetails.adjustedScore ?? keywordDetails.score
+          }/100 (${skipDecision.reason})`
+        );
         const kwScoreOn10 = ((keywordDetails.adjustedScore ?? keywordDetails.score ?? 0) / 100) * 0.5;
         const daysRemaining = getDaysRemaining(ao.deadline || '');
         return {
@@ -1673,6 +1677,8 @@ const analyzeOneAOSemanticStep = createStep({
         };
       }
     }
+
+    console.log(`[ao-veille] LLM gate: call LLM pour "${ao.title}"`);
 
     // Utiliser la nouvelle fonction avec structured output
     const result = await analyzeSemanticRelevance(ao, keywordDetails);

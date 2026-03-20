@@ -69,6 +69,11 @@ interface EvalResult {
   score: number | undefined;
   has_gap: boolean;
   old_ia_correct: boolean | 'partial' | null;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
   error?: string;
 }
 
@@ -109,6 +114,7 @@ async function runEval(rawCase: RawEvalCase, verbose = false): Promise<EvalResul
     );
 
     const details = result.details;
+    const usage = result.usage;
     const actual_decision = details?.decision_gate;
     const actual_recommandation = details?.recommandation;
     const rag_sources = details?.rag_sources ?? [];
@@ -154,6 +160,7 @@ async function runEval(rawCase: RawEvalCase, verbose = false): Promise<EvalResul
       score: result.score,
       has_gap: gap !== null,
       old_ia_correct: ia_correct,
+      usage,
     };
 
   } catch (err: any) {
@@ -321,6 +328,28 @@ async function main() {
   }
 
   printReport(results);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // COST SUMMARY (GPT-4o only, tools usage not included unless `usage` is exposed)
+  // ─────────────────────────────────────────────────────────────────────────────
+  const INPUT_COST_PER_TOKEN = 2.50 / 1_000_000;  // $2.50 / 1M input tokens
+  const OUTPUT_COST_PER_TOKEN = 10.00 / 1_000_000; // $10.00 / 1M output tokens
+
+  const measured = results.filter(r => r.usage?.totalTokens).length;
+  const totalPromptTokens = results.reduce((acc, r) => acc + (r.usage?.promptTokens ?? 0), 0);
+  const totalCompletionTokens = results.reduce((acc, r) => acc + (r.usage?.completionTokens ?? 0), 0);
+
+  const estimatedCost = (totalPromptTokens * INPUT_COST_PER_TOKEN) + (totalCompletionTokens * OUTPUT_COST_PER_TOKEN);
+  const costPerAO = results.length > 0 ? estimatedCost / results.length : 0;
+
+  console.log('\n=== COST SUMMARY (GPT-4o) ===');
+  console.log(`Total cases: ${results.length}`);
+  console.log(`Measured token usage: ${measured}/${results.length}`);
+  console.log(`Total prompt tokens: ${totalPromptTokens}`);
+  console.log(`Total completion tokens: ${totalCompletionTokens}`);
+  console.log(`Estimated cost: $${estimatedCost.toFixed(4)}`);
+  console.log(`Cost per AO: $${costPerAO.toFixed(5)}`);
+  console.log('===============================');
 }
 
 main().catch(err => {

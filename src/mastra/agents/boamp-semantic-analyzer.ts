@@ -18,6 +18,19 @@ import {
 } from '../tools/balthazar-rag-tools';
 
 // ──────────────────────────────────────────────────
+// UTILS
+// ──────────────────────────────────────────────────
+
+const LLM_THROTTLE_MS =
+  Number(process.env.LLM_THROTTLE_MS ?? '0') && Number(process.env.LLM_THROTTLE_MS ?? '0') > 0
+    ? Number(process.env.LLM_THROTTLE_MS)
+    : 0;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ──────────────────────────────────────────────────
 // TYPES
 // ──────────────────────────────────────────────────
 
@@ -296,9 +309,30 @@ export async function analyzeSemanticRelevance(
   score: number;
   reason: string;
   details: BalthazarSemanticAnalysis | null;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
 }> {
   const prompt = buildPrompt(ao, keywordScore);
   let lastError: unknown;
+  let promptTokensTotal = 0;
+  let completionTokensTotal = 0;
+  let totalTokensTotal = 0;
+
+  const addUsage = (usage: any) => {
+    if (!usage) return;
+    const promptTokens =
+      usage.promptTokens ?? usage.inputTokens ?? usage.prompt_tokens ?? usage.input_tokens;
+    const completionTokens =
+      usage.completionTokens ?? usage.outputTokens ?? usage.completion_tokens ?? usage.output_tokens;
+    const totalTokens = usage.totalTokens ?? usage.total_tokens;
+
+    if (typeof promptTokens === 'number') promptTokensTotal += promptTokens;
+    if (typeof completionTokens === 'number') completionTokensTotal += completionTokens;
+    if (typeof totalTokens === 'number') totalTokensTotal += totalTokens;
+  };
 
   for (let attempt = 0; attempt < MAX_RETRIES_RATE_LIMIT; attempt++) {
     try {
@@ -312,6 +346,9 @@ export async function analyzeSemanticRelevance(
             fallbackValue: DEFAULT_FALLBACK_ANALYSIS,
           },
         });
+
+        // Track token usage (if the SDK exposes it)
+        addUsage((response as any).usage);
 
         const rawObject = await response.object;
         const candidate = (rawObject ?? DEFAULT_FALLBACK_ANALYSIS) as BalthazarSemanticAnalysis;
@@ -337,10 +374,32 @@ export async function analyzeSemanticRelevance(
         console.log(`  → Rejet: ${analysis.rejet_raison}`);
       }
 
+      if (LLM_THROTTLE_MS > 0) {
+        console.log(
+          `[analyzeSemanticRelevance] Throttle ${LLM_THROTTLE_MS}ms après appel LLM pour "${ao.title}"`
+        );
+        await sleep(LLM_THROTTLE_MS);
+      }
+
+      const safeTitle = ao.title ? ao.title.slice(0, 50) : 'undefined';
+      if (totalTokensTotal > 0) {
+        console.log(
+          `[tokens] ${safeTitle} — prompt: ${promptTokensTotal}, completion: ${completionTokensTotal}, total: ${totalTokensTotal}`
+        );
+      }
+
       return {
         score: analysis.score_semantique_global,
         reason: analysis.justification_globale,
         details: analysis,
+        usage:
+          totalTokensTotal > 0
+            ? {
+                promptTokens: promptTokensTotal,
+                completionTokens: completionTokensTotal,
+                totalTokens: totalTokensTotal,
+              }
+            : undefined,
       };
     } catch (error: unknown) {
       lastError = error;
@@ -369,9 +428,31 @@ export async function analyzeSemanticRelevance(
     ? 'Limite de requêtes (TPM) dépassée — vérification humaine recommandée.'
     : `${(lastError as Error)?.message ?? 'Erreur inconnue'}. Score basé sur keywords uniquement.`;
 
+  if (LLM_THROTTLE_MS > 0) {
+    console.log(
+      `[analyzeSemanticRelevance] Throttle ${LLM_THROTTLE_MS}ms après fallback LLM pour "${ao.title}"`
+    );
+    await sleep(LLM_THROTTLE_MS);
+  }
+
+  const safeTitle = ao.title ? ao.title.slice(0, 50) : 'undefined';
+  if (totalTokensTotal > 0) {
+    console.log(
+      `[tokens] ${safeTitle} — prompt: ${promptTokensTotal}, completion: ${completionTokensTotal}, total: ${totalTokensTotal}`
+    );
+  }
+
   return {
     score: fallbackScore,
     reason: `Erreur analyse LLM: ${reasonSuffix}`,
     details: DEFAULT_FALLBACK_ANALYSIS,
+    usage:
+      totalTokensTotal > 0
+        ? {
+            promptTokens: promptTokensTotal,
+            completionTokens: completionTokensTotal,
+            totalTokens: totalTokensTotal,
+          }
+        : undefined,
   };
 }

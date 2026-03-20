@@ -31,6 +31,7 @@ let _vectorStore: PgVector | null = null;
 
 function getVectorStore(): PgVector {
   if (!_vectorStore) {
+    console.log('[RAG] Initializing PgVector, DATABASE_URL present:', !!process.env.DATABASE_URL);
     _vectorStore = new PgVector({
       connectionString: process.env.DATABASE_URL!,
     });
@@ -107,6 +108,8 @@ Returns ranked policy chunks with chunk_id (cite these in rag_sources).`,
         includeVector: false,
       });
 
+      console.log(`[balthazar-policies-query] query="${query}" → ${results.length} chunks returned`);
+
       const chunks = results.map(r => ({
         chunk_id: (r.metadata?.chunk_id as string) || r.id,
         score: r.score ?? 0,
@@ -121,6 +124,11 @@ Returns ranked policy chunks with chunk_id (cite these in rag_sources).`,
         count: chunks.length,
       };
     } catch (err: any) {
+      console.error(
+        '[balthazar-policies-query] store.query failed:',
+        err?.message,
+        err?.stack?.split('\n')[1]
+      );
       return {
         status: 'error',
         query,
@@ -171,6 +179,8 @@ Returns similar case study chunks with chunk_id (cite these in rag_sources).`,
         includeVector: false,
       });
 
+      console.log(`[balthazar-case-studies-query] query="${query}" → ${results.length} chunks returned`);
+
       const chunks = results.map(r => ({
         chunk_id: (r.metadata?.chunk_id as string) || r.id,
         score: r.score ?? 0,
@@ -186,6 +196,11 @@ Returns similar case study chunks with chunk_id (cite these in rag_sources).`,
         warning: 'Case studies are illustrations only. Do not use to override exclusion rules.',
       };
     } catch (err: any) {
+      console.error(
+        '[balthazar-case-studies-query] store.query failed:',
+        err?.message,
+        err?.stack?.split('\n')[1]
+      );
       return {
         status: 'error',
         query,
