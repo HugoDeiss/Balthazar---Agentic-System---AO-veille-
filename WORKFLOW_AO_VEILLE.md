@@ -53,7 +53,7 @@ export const aoVeilleWorkflow = createWorkflow({
 1. **`createWorkflow`** : Création du workflow principal avec schémas Zod
 2. **`createStep`** : Création de steps individuels avec validation entrée/sortie
 3. **`.then()`** : Enchaînement séquentiel des steps
-4. **`prepareForForeachStep`** : Transformation pour `.foreach()` ; si 0 AO, injecte un item contexte pour préserver le client (email CONFIRMATION)
+4. **`prepareForForeachStep`** : Split de `keywordMatched` en (AOs skip-LMM pré-résolus) + (AOs LLM pour `.foreach()`) ; si 0 AO, injecte un item contexte pour préserver le client (email CONFIRMATION)
 5. **`.foreach()`** : Traitement parallèle avec workflow imbriqué (concurrency: 1)
 6. **`.branch()`** : Branching conditionnel dans le workflow imbriqué
 
@@ -76,13 +76,13 @@ graph TB
     Cancellations --> Rectifs[detectRectificationStep<br/>Détecte rectificatifs]
     Rectifs --> Filter[filterAlreadyAnalyzedStep<br/>Évite re-analyse]
     Filter --> Keywords[keywordMatchingStep<br/>Pré-scoring mots-clés]
-    Keywords --> Prepare[prepareForForeachStep<br/>Si 0 AO: item contexte]
+    Keywords --> Prepare[prepareForForeachStep<br/>Pré-résout skip-LMM<br/>Si 0 AO: item contexte]
     Prepare --> Foreach[.foreach processOneAOWorkflow<br/>Traitement individuel<br/>concurrency: 1]
     
     Foreach --> Branch0[Branch 0: Contexte seul<br/>0€ LLM]
     Foreach --> Branch1[Branch 1: AO Annulé<br/>0€ LLM]
     Foreach --> Branch2[Branch 2: Rectificatif Mineur<br/>0€ LLM]
-    Foreach --> Branch3[Branch 2.5: Skip LLM<br/>0€ LLM]
+    Foreach --> Branch3[Branch 2.5: Skip LLM<br/>(pré-résolu le plus souvent)<br/>0€ LLM]
     Foreach --> Branch4[Branch 3/4: Analyse Complète<br/>1 appel LLM]
     
     Branch0 --> Normalize[normalizeBranchResultsStep<br/>Normalisation résultats]
@@ -455,21 +455,46 @@ import {
 
 ### Step 6 : Transformation pour `.foreach()`
 
-**Rôle** : Transformer l'objet `{ keywordMatched: [...], client: {...} }` en tableau pour `.foreach()`.
+**Rôle** : Réduire le volume de travail passé à `.foreach()` en pré-résolvant les AOs qui vont suivre le chemin “Skip LLM” (`_shouldSkipLLM === true`), puis en ne lançant `.foreach()` que pour les AOs qui doivent réellement exécuter le LLM.
 
 #### Logique
 
 ```typescript
-.map(async ({ inputData }) => {
-  const { keywordMatched, client } = inputData;
-  
-  // Chaque élément contient l'AO ET le client
-  // Le client est dupliqué car Mastra ne partage pas le contexte entre itérations
-  return keywordMatched.map(ao => ({ 
-    ao, 
-    client 
-  }));
-})
+execute: async ({ inputData }) => {
+  const { keywordMatched, client, since, until } = inputData;
+  const clientWithDateRange = { ...client, _dateRange: since && until ? { since, until } : undefined };
+
+  // Cas sans AO : on injecte un item contexte pour permettre l'envoi email CONFIRMATION
+  if (keywordMatched.length === 0) {
+    return [{ ao: { _contextOnly: true }, client: clientWithDateRange }];
+  }
+
+  // 1) Pré-résoudre les AOs skip LLM (Branch 2.5) pour éviter 1 itération .foreach() par AO
+  const skippedAOs = keywordMatched
+    .filter(ao => ao._shouldSkipLLM === true)
+    .map(ao => ({
+      ...ao,
+      // Calcul identique au chemin Branch 2.5 (score final/piorité basés keywords + pénalité)
+      finalScore: /* ... */,
+      priority: 'LOW' as const /* ou 'MEDIUM' */,
+      _skipLLM: true
+    }));
+
+  // 2) Ne passer à .foreach que les AOs nécessitant réellement le LLM
+  const llmAOs = keywordMatched.filter(ao => ao._shouldSkipLLM !== true);
+
+  // On porte les AOs pré-résolus dans le client pour permettre la fusion côté aggregation
+  const clientWithSkipped = {
+    ...clientWithDateRange,
+    _preResolvedSkippedAOs: skippedAOs
+  };
+
+  if (llmAOs.length === 0) {
+    return [{ ao: { _contextOnly: true }, client: clientWithSkipped }];
+  }
+
+  return llmAOs.map(ao => ({ ao, client: clientWithSkipped }));
+}
 ```
 
 **Résultat** : `[{ ao: AO1, client }, { ao: AO2, client }, ...]`
@@ -895,6 +920,7 @@ z.object({
 - **Total** : Nombre total d'AO traités
 - **Analysés** : Total - Annulés
 - **LLM Calls** : Nombre d'AO avec `semanticScore` défini (exclut skip LLM et annulés)
+  - Les AOs “skip LLM” pré-résolus sont fusionnés pour le rendu email/stats, mais restent exclus des “LLM Calls”.
 - **Par Source** : Séparation BOAMP / MarchesOnline pour email
 
 ---
