@@ -3,7 +3,7 @@ name: AO Veille Quotidienne
 on:
   schedule:
     # Tous les jours à 6h00 UTC (7h Paris hiver, 8h Paris été)
-    - cron: '0 6 * * *'
+    - cron: '0 6 * * 1-5'
   
   # Permet de déclencher manuellement le workflow pour tester
   workflow_dispatch:
