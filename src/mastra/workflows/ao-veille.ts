@@ -102,7 +102,16 @@ const clientSchema = z.object({
   }),
   technical: z.object({
     references: z.number()
-  })
+  }),
+  // Extra metadata used by workflow steps (not part of the persisted client schema)
+  _dateRange: z
+    .object({
+      since: z.string(),
+      until: z.string(),
+    })
+    .optional(),
+  // Pre-resolved AOs for the "skip LLM" path so we don't need to foreach over them.
+  _preResolvedSkippedAOs: z.array(z.any()).optional()
 });
 
 const aoSchema = z.object({
@@ -782,7 +791,58 @@ const prepareForForeachStep = createStep({
       console.log(`📋 Aucun AO à traiter — injection d'un item contexte pour préserver le client (email CONFIRMATION si besoin)`);
       return [{ ao: { _contextOnly: true }, client: clientWithDateRange }];
     }
-    return keywordMatched.map(ao => ({ ao, client: clientWithDateRange }));
+
+    // NOTE: Branch 2.5 (skip LLM) happens after Branch 1 (annulé) and Branch 2 (rectificatif mineur).
+    // To avoid changing routing/DB-update behavior, we only pre-resolve AOs that would truly hit Branch 2.5.
+    const isAnnule = (ao: any) =>
+      ao?.etat === 'AVIS_ANNULE' ||
+      (ao?.raw_json?.lifecycle?.nature_label || '').toLowerCase().includes('annulation') ||
+      (ao?.raw_json?.lifecycle?.nature || '').toLowerCase().includes('annulation');
+
+    const isMinorRectif = (ao: any) => ao?._isRectification === true && ao?._changes?.isSubstantial === false;
+
+    // Pre-resolve AOs that should skip LLM (Branch 2.5) to avoid 1-foreach iteration per AO.
+    const skippedAOs = keywordMatched
+      .filter((ao: any) => ao?._shouldSkipLLM === true && !isAnnule(ao) && !isMinorRectif(ao))
+      .map((ao: any) => {
+        const keywordDetails = ao.keywordDetails;
+        const keywordScoreOn10 = keywordDetails
+          ? keywordDetails.score / 10 // 0-100 -> 0-10
+          : ao.keywordScore * 10; // 0-1 -> 0-10
+
+        const finalScore = keywordScoreOn10 * 0.7; // Match existing skip-LLM branch behavior
+        const priority: 'MEDIUM' | 'LOW' =
+          finalScore >= 5.6 ? 'MEDIUM' : // ~80% of 7
+          finalScore >= 4.2 ? 'LOW' : 'LOW';
+
+        return {
+          ...ao,
+          finalScore,
+          priority,
+          _skipLLM: true,
+        };
+      });
+
+    // Only run foreach for AOs that are not skip-LLM (or would be routed to an earlier branch).
+    const llmAOs = keywordMatched.filter(
+      (ao: any) => !(ao?._shouldSkipLLM === true && !isAnnule(ao) && !isMinorRectif(ao))
+    );
+
+    const clientWithSkipped = {
+      ...clientWithDateRange,
+      _preResolvedSkippedAOs: skippedAOs,
+    } as any;
+
+    console.log(
+      `[prepareForForeachStep] ${skippedAOs.length} AOs pré-résolus (skip LLM) | ${llmAOs.length} AOs → foreach`
+    );
+
+    if (llmAOs.length === 0) {
+      // Keep foreach input non-empty (so normalize/aggregate still runs), but we will merge the pre-resolved items.
+      return [{ ao: { _contextOnly: true }, client: clientWithSkipped }];
+    }
+
+    return llmAOs.map((ao: any) => ({ ao, client: clientWithSkipped }));
   }
 });
 
@@ -2132,7 +2192,7 @@ const aggregateResultsStep = createStep({
     until: z.string().optional()
   }),
   execute: async ({ inputData }) => {
-    console.log(`📊 Agrégation de ${inputData.length} AO traités...`);
+    console.log(`📊 Agrégation de ${inputData.length} AO traités (foreach output)...`);
     
     // ────────────────────────────────────────────────────────────
     // 1. GÉRER LE CAS OÙ IL N'Y A AUCUN AO (tous annulés ou filtrés)
@@ -2173,12 +2233,14 @@ const aggregateResultsStep = createStep({
     // ────────────────────────────────────────────────────────────
     // 2. EXTRACTION : Récupérer tous les AO du tableau (exclure placeholders _contextOnly)
     // ────────────────────────────────────────────────────────────
-    const allAOs = inputData.map(item => item.ao).filter(ao => !(ao as any)._contextOnly);
-    
+    const foreachAOs = inputData.map(item => item.ao).filter(ao => !(ao as any)._contextOnly);
     // ────────────────────────────────────────────────────────────
     // 3. RÉCUPÉRATION DU CLIENT ET DE LA PLAGE DE DATES
     // ────────────────────────────────────────────────────────────
     const client = inputData[0]?.client;
+    const preResolvedSkipped = ((client as any)?._preResolvedSkippedAOs ?? []) as any[];
+    const allAOs = [...foreachAOs, ...preResolvedSkipped].filter(ao => !(ao as any)._contextOnly);
+    
     const dateRange = (client as any)?._dateRange;
     const since = dateRange?.since;
     const until = dateRange?.until;
