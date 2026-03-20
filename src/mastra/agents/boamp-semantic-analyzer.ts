@@ -345,6 +345,13 @@ export async function analyzeSemanticRelevance(
             errorStrategy: 'fallback',
             fallbackValue: DEFAULT_FALLBACK_ANALYSIS,
           },
+          onError: ({ error }: { error: string | Error }) => {
+            const message = typeof error === 'string' ? error : error?.message;
+            console.error(
+              `[analyzeSemanticRelevance] Stream error for "${ao.title}":`,
+              message ?? String(error)
+            );
+          },
         });
 
         // Track token usage (if the SDK exposes it)

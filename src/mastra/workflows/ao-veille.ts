@@ -1681,7 +1681,48 @@ const analyzeOneAOSemanticStep = createStep({
     console.log(`[ao-veille] LLM gate: call LLM pour "${ao.title}"`);
 
     // Utiliser la nouvelle fonction avec structured output
-    const result = await analyzeSemanticRelevance(ao, keywordDetails);
+    let result: Awaited<ReturnType<typeof analyzeSemanticRelevance>> | null = null;
+    try {
+      result = await analyzeSemanticRelevance(ao, keywordDetails);
+    } catch (unexpectedError: any) {
+      console.error(
+        `[analyzeOneAOSemanticStep] Unexpected error for "${ao.title}":`,
+        unexpectedError?.message ?? unexpectedError
+      );
+
+      const kwScore = (keywordDetails?.adjustedScore ?? keywordDetails?.score ?? 0) as number;
+      const daysRemaining = getDaysRemaining(ao.deadline || '');
+
+      return {
+        ao: {
+          ...ao,
+          semanticScore: (kwScore / 100) * 0.5,
+          semanticReason: 'Analyse indisponible — score basé sur mots-clés uniquement.',
+          semanticDetails: DEFAULT_FALLBACK_ANALYSIS,
+          procedureType: ao.raw_json?.procedure_libelle || null,
+          daysRemaining,
+        },
+        client,
+      };
+    }
+
+    // Should be impossible: if the try block returns, we already handled it.
+    // This guard exists for type-safety and to avoid crashing due to unforeseen paths.
+    if (!result) {
+      const kwScore = (keywordDetails?.adjustedScore ?? keywordDetails?.score ?? 0) as number;
+      const daysRemaining = getDaysRemaining(ao.deadline || '');
+      return {
+        ao: {
+          ...ao,
+          semanticScore: (kwScore / 100) * 0.5,
+          semanticReason: 'Analyse indisponible — score basé sur mots-clés uniquement.',
+          semanticDetails: DEFAULT_FALLBACK_ANALYSIS,
+          procedureType: ao.raw_json?.procedure_libelle || null,
+          daysRemaining,
+        },
+        client,
+      };
+    }
     
     // Calculer les jours restants
     const daysRemaining = getDaysRemaining(ao.deadline || '');
