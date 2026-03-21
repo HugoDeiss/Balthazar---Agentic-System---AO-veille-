@@ -26,6 +26,8 @@ export interface EmailData {
     url: string;
     reason?: string; // Explanation why this AO is low priority
   }>;
+  /** Nombre d'AOs LOW omis de l'email (liste tronquée pour limite taille) */
+  lowPriorityTruncatedCount?: number;
   noAOsReason?: string; // Explanation if no AOs analyzed
 }
 
@@ -73,7 +75,8 @@ export function generateEmailHTML(data: EmailData): string {
   const dateFormatted = getDateFormatted(data);
   const totalAnalyzed = data.statsBySource.BOAMP.total + data.statsBySource.MARCHESONLINE.total;
   const totalRelevant = data.relevantAOs.length;
-  const totalLow = data.lowPriorityAOs.length;
+  const totalLowFromStats =
+    data.statsBySource.BOAMP.low + data.statsBySource.MARCHESONLINE.low;
 
   return `
 <!DOCTYPE html>
@@ -121,9 +124,9 @@ export function generateEmailHTML(data: EmailData): string {
                   Aucun appel d'offres pertinent identifié
                 </p>
                 `}
-                ${totalLow > 0 ? `
+                ${totalLowFromStats > 0 ? `
                 <p style="margin: 5px 0; color: #6c757d; font-size: 14px;">
-                  <strong>${totalLow}</strong> appel${totalLow > 1 ? 's' : ''} d'offres à faible priorité (LOW)
+                  <strong>${totalLowFromStats}</strong> appel${totalLowFromStats > 1 ? 's' : ''} d'offres à faible priorité (LOW)
                 </p>
                 ` : ''}
               </div>
@@ -224,6 +227,11 @@ export function generateEmailHTML(data: EmailData): string {
                   ` : ''}
                 </div>
                 `).join('')}
+                ${data.lowPriorityTruncatedCount && data.lowPriorityTruncatedCount > 0 ? `
+                <p style="margin: 16px 0 0; color: #6c757d; font-size: 13px; line-height: 1.5;">
+                  + ${data.lowPriorityTruncatedCount} autre${data.lowPriorityTruncatedCount > 1 ? 's' : ''} AO${data.lowPriorityTruncatedCount > 1 ? 's' : ''} à faible priorité non affiché${data.lowPriorityTruncatedCount > 1 ? 's' : ''} (score keywords insuffisant)
+                </p>
+                ` : ''}
               </div>
             </td>
           </tr>
@@ -271,7 +279,8 @@ export function generateEmailText(data: EmailData): string {
   const dateFormatted = getDateFormatted(data);
   const totalAnalyzed = data.statsBySource.BOAMP.total + data.statsBySource.MARCHESONLINE.total;
   const totalRelevant = data.relevantAOs.length;
-  const totalLow = data.lowPriorityAOs.length;
+  const totalLowFromStats =
+    data.statsBySource.BOAMP.low + data.statsBySource.MARCHESONLINE.low;
 
   let text = `Veille Appels d'Offres - ${dateFormatted}\n\n`;
   text += `Récapitulatif\n`;
@@ -287,8 +296,8 @@ export function generateEmailText(data: EmailData): string {
     } else {
       text += `Aucun appel d'offres pertinent identifié\n`;
     }
-    if (totalLow > 0) {
-      text += `${totalLow} appel${totalLow > 1 ? 's' : ''} d'offres à faible priorité (LOW)\n`;
+    if (totalLowFromStats > 0) {
+      text += `${totalLowFromStats} appel${totalLowFromStats > 1 ? 's' : ''} d'offres à faible priorité (LOW)\n`;
     }
     text += `\n`;
   }
@@ -345,6 +354,9 @@ export function generateEmailText(data: EmailData): string {
       }
       text += `   Lien: ${ao.url}\n\n`;
     });
+    if (data.lowPriorityTruncatedCount && data.lowPriorityTruncatedCount > 0) {
+      text += `+ ${data.lowPriorityTruncatedCount} autre${data.lowPriorityTruncatedCount > 1 ? 's' : ''} AO${data.lowPriorityTruncatedCount > 1 ? 's' : ''} à faible priorité non affiché${data.lowPriorityTruncatedCount > 1 ? 's' : ''} (score keywords insuffisant)\n\n`;
+    }
   }
 
   text += `\n---\n`;

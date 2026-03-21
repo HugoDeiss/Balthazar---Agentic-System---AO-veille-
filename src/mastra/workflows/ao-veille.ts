@@ -1213,6 +1213,7 @@ const sendEmailStep = createStep({
     emailSent: z.boolean()
   }),
   execute: async ({ inputData }) => {
+    try {
     // ────────────────────────────────────────────────────────────
     // 0. CONTRÔLE PRÉALABLE CLIENT
     // ────────────────────────────────────────────────────────────
@@ -1356,6 +1357,15 @@ const sendEmailStep = createStep({
       console.log(`ℹ️ Email FULL: premier envoi de veille pour ${clientId} sur la plage ${sinceDate} → ${untilDate}.`);
     }
 
+    const MAX_LOW_PRIORITY = 100;
+    const lowPriorityTruncatedCount = Math.max(0, lowPriorityAOs.length - MAX_LOW_PRIORITY);
+    const lowPriorityAOsCapped = lowPriorityAOs.slice(0, MAX_LOW_PRIORITY);
+    if (lowPriorityTruncatedCount > 0) {
+      console.log(
+        `[sendEmailStep] Truncating lowPriorityAOs: ${lowPriorityAOs.length} → ${MAX_LOW_PRIORITY} (${lowPriorityTruncatedCount} omis)`
+      );
+    }
+
     // ────────────────────────────────────────────────────────────
     // 4. PRÉPARATION DES DONNÉES POUR LE TEMPLATE
     // ────────────────────────────────────────────────────────────
@@ -1364,7 +1374,8 @@ const sendEmailStep = createStep({
       ...(since && until && { dateRange: { since, until } }),
       statsBySource: inputData.statsBySource,
       relevantAOs,
-      lowPriorityAOs,
+      lowPriorityAOs: lowPriorityAOsCapped,
+      ...(lowPriorityTruncatedCount > 0 ? { lowPriorityTruncatedCount } : {}),
       noAOsReason
     };
 
@@ -1414,6 +1425,11 @@ const sendEmailStep = createStep({
     } catch (error: any) {
       console.error(`❌ Exception lors de la génération/envoi email:`, error?.message || error);
       // Ne pas faire échouer le workflow si l'email échoue
+      return { emailSent: false };
+    }
+    } catch (fatalError: any) {
+      console.error('[sendEmailStep] Fatal uncaught error:', fatalError?.message ?? fatalError);
+      console.error('[sendEmailStep] Stack:', fatalError?.stack);
       return { emailSent: false };
     }
   }
