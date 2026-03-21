@@ -26,8 +26,8 @@ export interface EmailData {
     url: string;
     reason?: string; // Explanation why this AO is low priority
   }>;
-  /** Nombre d'AOs LOW omis de l'email (liste tronquée pour limite taille) */
-  lowPriorityTruncatedCount?: number;
+  /** AOs exclus avant analyse LLM (filtre mots-clés / hors périmètre) */
+  keywordFilteredCount?: number;
   noAOsReason?: string; // Explanation if no AOs analyzed
 }
 
@@ -195,11 +195,12 @@ export function generateEmailHTML(data: EmailData): string {
           </tr>
           ` : ''}
           
-          ${data.lowPriorityAOs.length > 0 ? `
+          ${data.lowPriorityAOs.length > 0 || (data.keywordFilteredCount && data.keywordFilteredCount > 0) ? `
           <!-- Low Priority AOs Section -->
           <tr>
             <td style="padding: 0 30px 30px;">
               <h2 style="margin: 0 0 15px; color: #1a1a1a; font-size: 18px; font-weight: 600;">Appels d'Offres à Faible Priorité</h2>
+              ${data.lowPriorityAOs.length > 0 ? `
               ${data.relevantAOs.length === 0 ? `
               <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
                 <p style="margin: 0; color: #856404; font-size: 14px;">
@@ -227,12 +228,13 @@ export function generateEmailHTML(data: EmailData): string {
                   ` : ''}
                 </div>
                 `).join('')}
-                ${data.lowPriorityTruncatedCount && data.lowPriorityTruncatedCount > 0 ? `
-                <p style="margin: 16px 0 0; color: #6c757d; font-size: 13px; line-height: 1.5;">
-                  + ${data.lowPriorityTruncatedCount} autre${data.lowPriorityTruncatedCount > 1 ? 's' : ''} AO${data.lowPriorityTruncatedCount > 1 ? 's' : ''} à faible priorité non affiché${data.lowPriorityTruncatedCount > 1 ? 's' : ''} (score keywords insuffisant)
-                </p>
-                ` : ''}
               </div>
+              ` : ''}
+              ${data.keywordFilteredCount && data.keywordFilteredCount > 0 ? `
+              <p style="margin: ${data.lowPriorityAOs.length > 0 ? '16px' : '0'} 0 0; color: #6c757d; font-size: 13px; line-height: 1.5;">
+                + ${data.keywordFilteredCount} AO(s) exclus par filtre mots-clés (hors périmètre métier — non analysés par l'IA)
+              </p>
+              ` : ''}
             </td>
           </tr>
           ` : ''}
@@ -338,24 +340,26 @@ export function generateEmailText(data: EmailData): string {
     });
   }
 
-  if (data.lowPriorityAOs.length > 0) {
+  if (data.lowPriorityAOs.length > 0 || (data.keywordFilteredCount && data.keywordFilteredCount > 0)) {
     text += `Appels d'Offres à Faible Priorité\n`;
     text += `${'='.repeat(50)}\n\n`;
-    if (data.relevantAOs.length === 0) {
-      text += `Pourquoi aucun AO n'est pertinent ?\n`;
-      text += `Les appels d'offres ci-dessous ont été analysés mais n'ont pas été jugés pertinents pour Balthazar selon les critères d'analyse sémantique et de mots-clés.\n\n`;
-    } else {
-      text += `Les appels d'offres suivants ont été analysés mais jugés moins pertinents que ceux listés ci-dessus.\n\n`;
-    }
-    data.lowPriorityAOs.forEach((ao, index) => {
-      text += `${index + 1}. [FAIBLE PRIORITÉ] ${ao.title} (${ao.source})\n`;
-      if (ao.reason) {
-        text += `   Raison: ${ao.reason}\n`;
+    if (data.lowPriorityAOs.length > 0) {
+      if (data.relevantAOs.length === 0) {
+        text += `Pourquoi aucun AO n'est pertinent ?\n`;
+        text += `Les appels d'offres ci-dessous ont été analysés mais n'ont pas été jugés pertinents pour Balthazar selon les critères d'analyse sémantique et de mots-clés.\n\n`;
+      } else {
+        text += `Les appels d'offres suivants ont été analysés mais jugés moins pertinents que ceux listés ci-dessus.\n\n`;
       }
-      text += `   Lien: ${ao.url}\n\n`;
-    });
-    if (data.lowPriorityTruncatedCount && data.lowPriorityTruncatedCount > 0) {
-      text += `+ ${data.lowPriorityTruncatedCount} autre${data.lowPriorityTruncatedCount > 1 ? 's' : ''} AO${data.lowPriorityTruncatedCount > 1 ? 's' : ''} à faible priorité non affiché${data.lowPriorityTruncatedCount > 1 ? 's' : ''} (score keywords insuffisant)\n\n`;
+      data.lowPriorityAOs.forEach((ao, index) => {
+        text += `${index + 1}. [FAIBLE PRIORITÉ] ${ao.title} (${ao.source})\n`;
+        if (ao.reason) {
+          text += `   Raison: ${ao.reason}\n`;
+        }
+        text += `   Lien: ${ao.url}\n\n`;
+      });
+    }
+    if (data.keywordFilteredCount && data.keywordFilteredCount > 0) {
+      text += `+ ${data.keywordFilteredCount} AO(s) exclus par filtre mots-clés (hors périmètre métier — non analysés par l'IA)\n\n`;
     }
   }
 

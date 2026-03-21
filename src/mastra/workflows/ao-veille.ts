@@ -1307,9 +1307,10 @@ const sendEmailStep = createStep({
       });
     });
 
-    // Extraire LOW de toutes les sources
-    const lowPriorityAOs: EmailData['lowPriorityAOs'] = [];
-    
+    // Extraire LOW de toutes les sources (_skipLLM conservé pour séparer email LLM vs filtre mots-clés)
+    type LowPriorityRow = EmailData['lowPriorityAOs'][number] & { _skipLLM?: boolean };
+    const lowPriorityAOs: LowPriorityRow[] = [];
+
     [...inputData.lowBySource.BOAMP, ...inputData.lowBySource.MARCHESONLINE].forEach(ao => {
       // Extraire la raison de faible priorité
       // Priorité : rejected_reason > semanticReason > message générique
@@ -1323,12 +1324,13 @@ const sendEmailStep = createStep({
       } else {
         reason = 'Analyse sémantique indique une pertinence limitée pour Balthazar';
       }
-      
+
       lowPriorityAOs.push({
         source: ao.source || 'UNKNOWN',
         title: ao.title || 'Sans titre',
         url: ao.url_ao || '#',
-        reason
+        reason,
+        _skipLLM: !!(ao as any)._skipLLM
       });
     });
 
@@ -1358,13 +1360,39 @@ const sendEmailStep = createStep({
     }
 
     const MAX_LOW_PRIORITY = 100;
-    const lowPriorityTruncatedCount = Math.max(0, lowPriorityAOs.length - MAX_LOW_PRIORITY);
-    const lowPriorityAOsCapped = lowPriorityAOs.slice(0, MAX_LOW_PRIORITY);
-    if (lowPriorityTruncatedCount > 0) {
-      console.log(
-        `[sendEmailStep] Truncating lowPriorityAOs: ${lowPriorityAOs.length} → ${MAX_LOW_PRIORITY} (${lowPriorityTruncatedCount} omis)`
-      );
-    }
+
+    // Split LLM-analyzed vs keyword-filtered
+    const KEYWORD_SKIP_REASONS = [
+      'Hors périmètre — score mots-clés insuffisant.',
+      'Score keywords insuffisant pour une analyse approfondie',
+      'Analyse indisponible — score basé sur mots-clés uniquement.'
+    ];
+
+    const llmAnalyzedLowAOs = lowPriorityAOs.filter(
+      ao =>
+        !(ao as any)._skipLLM && !KEYWORD_SKIP_REASONS.includes(ao.reason ?? '')
+    );
+
+    const keywordFilteredAOs = lowPriorityAOs.filter(
+      ao =>
+        !!(ao as any)._skipLLM || KEYWORD_SKIP_REASONS.includes(ao.reason ?? '')
+    );
+
+    // LLM-analyzed first (cap so total never exceeds MAX_LOW_PRIORITY), then keyword-filtered for remaining slots
+    const llmToShow = llmAnalyzedLowAOs.slice(0, MAX_LOW_PRIORITY);
+    const remainingSlots = Math.max(0, MAX_LOW_PRIORITY - llmToShow.length);
+    const keywordFilteredToShow = keywordFilteredAOs.slice(0, remainingSlots);
+    const keywordFilteredCount = keywordFilteredAOs.length - keywordFilteredToShow.length;
+
+    const lowPriorityAOsCapped = [...llmToShow, ...keywordFilteredToShow];
+
+    console.log(
+      `[sendEmailStep] lowPriorityAOs: ${llmToShow.length} LLM | ${keywordFilteredToShow.length} keywords shown | ${keywordFilteredCount} keywords omis`
+    );
+
+    const lowPriorityAOsForEmail: EmailData['lowPriorityAOs'] = lowPriorityAOsCapped.map(
+      ({ source, title, url, reason }) => ({ source, title, url, reason })
+    );
 
     // ────────────────────────────────────────────────────────────
     // 4. PRÉPARATION DES DONNÉES POUR LE TEMPLATE
@@ -1374,8 +1402,8 @@ const sendEmailStep = createStep({
       ...(since && until && { dateRange: { since, until } }),
       statsBySource: inputData.statsBySource,
       relevantAOs,
-      lowPriorityAOs: lowPriorityAOsCapped,
-      ...(lowPriorityTruncatedCount > 0 ? { lowPriorityTruncatedCount } : {}),
+      lowPriorityAOs: lowPriorityAOsForEmail,
+      ...(keywordFilteredCount > 0 ? { keywordFilteredCount } : {}),
       noAOsReason
     };
 
