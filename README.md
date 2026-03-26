@@ -460,7 +460,8 @@ Le serveur Mastra démarre sur `http://localhost:4111` (port configuré dans `sr
 
 ### Déploiement et automatisation
 
-- **[GITHUB_WORKFLOW_QUOTIDIEN.md](./GITHUB_WORKFLOW_QUOTIDIEN.md)** — Déclenchement quotidien (GitHub Actions)
+- **[INNGEST.md](./INNGEST.md)** — Planification quotidienne en production (Inngest + Mastra Cloud)
+- **[GITHUB_WORKFLOW_QUOTIDIEN.md](./GITHUB_WORKFLOW_QUOTIDIEN.md)** — Archivé : ancien workflow GitHub (supprimé)
 - **[docs/TESTS_AVANT_COMMIT.md](./docs/TESTS_AVANT_COMMIT.md)** — Tests et checklist avant commit / modification du workflow
 - **[DEPLOIEMENT_MASTRA_CLOUD.md](./DEPLOIEMENT_MASTRA_CLOUD.md)** — Déploiement Mastra Cloud
 
@@ -511,13 +512,15 @@ console.log(`${result.saved} AO analysés`);
 console.log(`${result.high} HIGH, ${result.medium} MEDIUM`);
 ```
 
-### Automatisation Quotidienne
+### Automatisation quotidienne (production)
 
-Le système s'exécute automatiquement chaque jour via **GitHub Actions** :
+En production, la veille est planifiée par **Inngest** (cron sur Mastra Cloud) :
 
-- 🕐 **Déclenchement** : Tous les jours à 6h00 UTC (7h Paris hiver, 8h été)
-- 🤖 **Workflow GitHub** : `.github/workflows/daily-ao-veille.yml`
-- 🔗 **Documentation complète** : `GITHUB_WORKFLOW_QUOTIDIEN.md`
+- 🕐 **Horaire** : 6h00 UTC, **lundi–vendredi** (7h Paris hiver / 8h été)
+- 🔗 **Endpoint** : `https://<domaine-mastra-cloud>/api/inngest` (sync dans le dashboard Inngest)
+- 📄 **Documentation** : [INNGEST.md](./INNGEST.md)
+
+Pour un **test manuel** sans attendre le cron : invoke dans Inngest, ou Mastra Studio / API (voir [INNGEST.md](./INNGEST.md)).
 
 **Voir aussi** les scripts dans `scripts/` pour retry manuel :
 - `schedule-retry.ts` - Planifier un retry

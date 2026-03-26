@@ -186,8 +186,13 @@ Vérifier que toutes les variables nécessaires sont configurées dans Mastra Cl
 | `SUPABASE_SERVICE_KEY` | ✅ Oui | Clé service Supabase |
 | `RESEND_API_KEY` | ✅ Oui | Clé API Resend (emails) |
 | `EMAIL_FROM` | Optionnel | Adresse expéditrice des emails |
+| `INNGEST_SIGNING_KEY` | ✅ Oui (prod + Inngest) | Vérification des requêtes signées depuis Inngest Cloud |
+| `INNGEST_EVENT_KEY` | Selon config Inngest | Client / envoi d’événements (voir dashboard Inngest) |
+| `BALTHAZAR_CLIENT_ID` | ✅ Oui | ID client passé au workflow de veille (ex. `balthazar`) |
 
 **Important** : `DATABASE_URL` est requis pour le vector store pgvector (policies, case studies). Sans elle, l'agent RAG ne peut pas s'initialiser correctement.
+
+**Inngest** : après déploiement, synchroniser l’app Inngest vers `https://<votre-domaine-mastra-cloud>/api/inngest`. Détail : [INNGEST.md](./INNGEST.md).
 
 ---
 
@@ -223,7 +228,7 @@ Vérifier que toutes les variables nécessaires sont configurées dans Mastra Cl
 - [ ] Mastra Directory : `src/mastra`
 - [ ] Install Command : `npm ci --omit=dev`
 - [ ] Build Command : `npm run build`
-- [ ] Variables d'environnement : `DATABASE_URL`, `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `RESEND_API_KEY` (voir section 4)
+- [ ] Variables d'environnement : `DATABASE_URL`, `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `RESEND_API_KEY`, `BALTHAZAR_CLIENT_ID`, `INNGEST_SIGNING_KEY` (+ `INNGEST_EVENT_KEY` si requis) — voir section 4 et [INNGEST.md](./INNGEST.md)
 
 ---
 
@@ -359,15 +364,16 @@ Package listé dans `bundler.externals` mais absent de `dependencies`.
 
 ---
 
-### ⚠️ Erreur 524 (Cloudflare Timeout) au déclenchement cron
+### ⚠️ Erreur 524 (Cloudflare Timeout) sur un appel HTTP vers Mastra Cloud
 
-**Symptôme** : Le workflow GitHub reçoit un code 524 "A timeout occurred" lors de l'appel à Mastra Cloud.
+**Symptôme** : Un client HTTP (script, curl, outil externe) reçoit **524** *A timeout occurred* alors que Mastra a pu quand même démarrer le traitement.
 
 **Causes possibles** :
-- Code de debug laissé en prod : `fetch('http://127.0.0.1:7243/...')` dans `ao-veille.ts` ou `boamp-fetcher.ts` — **ne jamais commiter**
+- Code de debug laissé en prod : `fetch('http://127.0.0.1:7243/...')` — **ne jamais commiter**
 - `DATABASE_URL` manquant dans Mastra Cloud (connexion pgvector bloque au démarrage)
+- Réponse trop lente pour le délai du client (Cloudflare ~100 s)
 
-**Solution** : Supprimer toute instrumentation vers `127.0.0.1:7243`, vérifier `DATABASE_URL` dans les variables Mastra Cloud. Voir `GITHUB_WORKFLOW_QUOTIDIEN.md` section "Problème 5b".
+**Solution** : Supprimer toute instrumentation vers `127.0.0.1:7243`, vérifier `DATABASE_URL`. Pour le **cron** quotidien, utiliser **Inngest** ([INNGEST.md](./INNGEST.md)) plutôt qu’un `curl` avec timeout court.
 
 ---
 

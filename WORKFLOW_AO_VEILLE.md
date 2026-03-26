@@ -1337,7 +1337,7 @@ Le step `sendEmailStep` vérifie la table `veille_email_logs` avant d'envoyer :
 - **Avant envoi** : Requête Supabase ; si un log `status='sent'` existe déjà → skip
 - **Après envoi** : Insert dans `veille_email_logs` avec `message_id_resend` (succès ou échec)
 
-Évite les doublons même si le workflow est déclenché plusieurs fois (ex. retries GitHub sur 524).
+Évite les doublons même si le workflow est déclenché plusieurs fois (ex. retries Inngest, relances manuelles, ou anciennement retries GitHub sur 524).
 
 ### Cas 0 AO (email CONFIRMATION)
 
@@ -1367,7 +1367,7 @@ Migrations dans `supabase-setup.sql`.
 
 - **Parallélisme** : 1 AO analysé par le LLM à la fois (priorité stabilité TPM)
 - **Rate Limiting** : Un seul appel LLM simultané évite les pics de tokens et les erreurs 429
-- **Vitesse** : Le cron tourne à 7h UTC ; 4 min ou 12 min n'impacte pas l'usage
+- **Vitesse** : La planification prod (Inngest) tourne à **6h00 UTC** les jours ouvrés ; quelques minutes de durée n’impactent pas l’usage métier
 
 ### Override MarchesOnline RSS
 
