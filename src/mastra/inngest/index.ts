@@ -16,7 +16,7 @@ function createAoVeilleFunction(mastra: Mastra) {
   return inngest.createFunction(
     { id: 'ao-veille-daily', name: 'AO Veille Quotidienne' },
     { cron: '0 6 * * 1-5' },
-    async () => {
+    async ({ step }) => {
       const dayOfWeek = new Date().getDay(); // 0=Sun 1=Mon 3=Wed 5=Fri
       const isMarchesonlineDay = dayOfWeek === 3 || dayOfWeek === 5;
 
@@ -24,16 +24,18 @@ function createAoVeilleFunction(mastra: Mastra) {
         ? ['https://www.marchesonline.com/mol/rss/appels-d-offres-domaine-activite-services.xml']
         : undefined;
 
-      const workflow = mastra.getWorkflow('aoVeilleWorkflow');
-      const run = await workflow.createRunAsync();
-      const result = await run.start({
-        inputData: {
-          clientId: process.env.BALTHAZAR_CLIENT_ID!,
-          ...(marchesonlineRSSUrls && { marchesonlineRSSUrls }),
-        },
+      // step.run() provides Inngest memoization: if this function retries,
+      // the workflow won't re-execute (idempotency at step level).
+      return step.run('run-ao-veille', async () => {
+        const workflow = mastra.getWorkflow('aoVeilleWorkflow');
+        const run = await workflow.createRunAsync();
+        return run.start({
+          inputData: {
+            clientId: process.env.BALTHAZAR_CLIENT_ID!,
+            ...(marchesonlineRSSUrls && { marchesonlineRSSUrls }),
+          },
+        });
       });
-
-      return result;
     },
   );
 }
