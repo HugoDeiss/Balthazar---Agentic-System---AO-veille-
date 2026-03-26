@@ -41,10 +41,31 @@ function createAoVeilleFunction(mastra: Mastra) {
 }
 
 /**
+ * Inngest function — triggered when a feedback is submitted.
+ * Starts the feedbackWorkflow to diagnose and propose a correction.
+ */
+function createFeedbackProcessorFunction(mastra: Mastra) {
+  return inngest.createFunction(
+    { id: 'feedback-processor', name: 'AO Feedback Processor' },
+    { event: 'ao.feedback.submitted' },
+    async ({ event, step }) => {
+      await step.run('run-feedback-workflow', async () => {
+        const workflow = mastra.getWorkflow('feedbackWorkflow');
+        const run = await workflow.createRunAsync();
+        await run.start({ inputData: { feedbackId: event.data.feedbackId } });
+      });
+    },
+  );
+}
+
+/**
  * Returns a Hono handler for the /api/inngest endpoint.
  * Called from Mastra's server.apiRoutes so the mastra instance is injected.
  */
 export function createInngestHandler(mastra: Mastra) {
-  const functions = [createAoVeilleFunction(mastra)];
+  const functions = [
+    createAoVeilleFunction(mastra),
+    createFeedbackProcessorFunction(mastra),
+  ];
   return serve({ client: inngest, functions });
 }

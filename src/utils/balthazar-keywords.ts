@@ -842,11 +842,12 @@ export function shouldSkipLLM(scoreResult: KeywordScoreResult): {
  */
 export function calculateEnhancedKeywordScore(
   ao: { title: string; description?: string; acheteur?: string },
-  baseScoreResult: KeywordScoreResult
+  baseScoreResult: KeywordScoreResult,
+  additionalRedFlags: string[] = []
 ): EnhancedKeywordScoreResult {
   let finalScore = baseScoreResult.score;
   const bonusDetails: string[] = [];
-  
+
   const fullText = normalizeText([
     ao.title,
     ao.description || '',
@@ -915,6 +916,17 @@ export function calculateEnhancedKeywordScore(
     bonusDetails.push('high_impact_keywords_strategie_innovation');
   }
   
+  // MALUS dynamique : Red flags supplémentaires depuis keyword_overrides
+  if (additionalRedFlags.length > 0) {
+    const hasAdditionalRedFlag = additionalRedFlags.some(flag =>
+      fullText.includes(normalizeText(flag))
+    );
+    if (hasAdditionalRedFlag) {
+      finalScore -= 30;
+      bonusDetails.push('dynamic_red_flag_penalty');
+    }
+  }
+
   // MALUS 1 : Red flags critiques (-30 points mais pas éliminatoire)
   if (baseScoreResult.red_flags_detected.length > 0) {
     finalScore -= 30;

@@ -5,4 +5,5 @@
  */
 
 export { aoVeilleWorkflow } from "./ao-veille";
+export { feedbackWorkflow } from "./feedback-workflow";
 

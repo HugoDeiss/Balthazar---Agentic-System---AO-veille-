@@ -3,11 +3,20 @@ import { createInngestHandler } from "./inngest";
 
 // Import agents
 import {
-  boampSemanticAnalyzer
+  boampSemanticAnalyzer,
+  aoFeedbackTuningAgent,
+  aoFeedbackAgent,
 } from "./agents";
 
 // Import workflows
-import { aoVeilleWorkflow } from "./workflows";
+import { aoVeilleWorkflow, feedbackWorkflow } from "./workflows";
+
+// Import feedback handlers
+import {
+  handleFeedbackForm,
+  handleFeedbackSubmit,
+  handleFeedbackConfirm,
+} from "./server/feedback-handlers";
 
 /**
  * Balthazar Tender Monitoring System
@@ -31,9 +40,12 @@ import { aoVeilleWorkflow } from "./workflows";
 export const mastra = new Mastra({
   agents: {
     boampSemanticAnalyzer,
+    aoFeedbackTuningAgent,
+    aoFeedbackAgent,
   },
   workflows: {
     aoVeilleWorkflow,
+    feedbackWorkflow,
   },
   bundler: {
     externals: [
@@ -50,6 +62,21 @@ export const mastra = new Mastra({
         path: '/api/inngest',
         method: 'ALL',
         createHandler: async ({ mastra }) => createInngestHandler(mastra),
+      },
+      {
+        path: '/api/feedback',
+        method: 'GET',
+        createHandler: async () => async (req: Request) => handleFeedbackForm(req),
+      },
+      {
+        path: '/api/feedback/submit',
+        method: 'POST',
+        createHandler: async () => async (req: Request) => handleFeedbackSubmit(req),
+      },
+      {
+        path: '/api/feedback/confirm',
+        method: 'GET',
+        createHandler: async ({ mastra }) => async (req: Request) => handleFeedbackConfirm(req, mastra),
       },
     ],
     cors: {

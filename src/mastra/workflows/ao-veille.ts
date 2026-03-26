@@ -15,6 +15,7 @@ import { analyzeSemanticRelevance, DEFAULT_FALLBACK_ANALYSIS, type BalthazarSema
 import { findBatchBOAMPMatches } from '../../utils/cross-platform-dedup';
 import { generateEmailHTML, generateEmailText, generateEmailSubject, type EmailData } from '../../utils/email-templates';
 import { sendEmail } from '../../utils/email-sender';
+import { buildHumanReadableReason } from '../../utils/human-readable-reason';
 
 // ──────────────────────────────────────────────────
 // SUPABASE CLIENT
@@ -704,9 +705,20 @@ const keywordMatchingStep = createStep({
   }),
   execute: async ({ inputData }) => {
     const { toAnalyze: prequalified, client, since, until } = inputData;
-    
+
     console.log(`🔍 Keyword matching amélioré (lexique Balthazar) sur ${prequalified.length} AO...`);
-    
+
+    // Charger les overrides dynamiques (Brique 4)
+    const { data: overrides } = await supabase
+      .from('keyword_overrides')
+      .select('type, value')
+      .eq('client_id', client.id ?? 'balthazar')
+      .eq('active', true);
+    const dynamicRedFlags = overrides?.filter((o: any) => o.type === 'red_flag').map((o: any) => o.value) ?? [];
+    if (dynamicRedFlags.length > 0) {
+      console.log(`   🚩 ${dynamicRedFlags.length} red flag(s) dynamique(s) chargé(s)`);
+    }
+
     const keywordMatched = prequalified.map(ao => {
       // Utiliser la nouvelle fonction de scoring
       const baseScoreResult = calculateKeywordScore(
@@ -715,9 +727,9 @@ const keywordMatchingStep = createStep({
         ao.keywords,
         ao.acheteur
       );
-      
-      // Appliquer bonus/malus métier
-      const enhancedScoreResult = calculateEnhancedKeywordScore(ao, baseScoreResult);
+
+      // Appliquer bonus/malus métier (avec red flags dynamiques)
+      const enhancedScoreResult = calculateEnhancedKeywordScore(ao, baseScoreResult, dynamicRedFlags);
       
       // Décision skip LLM intelligente
       const skipDecision = shouldSkipLLM(enhancedScoreResult);
@@ -1128,9 +1140,20 @@ const saveResultsStep = createStep({
         raw_json: ao.raw_json,
         status: 'analyzed',
         analyzed_at: new Date().toISOString(),
-        
+
         // 🆕 Stocker annonce_lie pour recherche optimisée
-        annonce_lie: ao.raw_json?.lifecycle?.annonce_lie || ao.raw_json?.annonce_lie || null
+        annonce_lie: ao.raw_json?.lifecycle?.annonce_lie || ao.raw_json?.annonce_lie || null,
+
+        // 🆕 Machine trace (Brique 1)
+        keyword_breakdown: ao.keywordDetails?.breakdown ?? null,
+        matched_keywords_detail: ao.keywordDetails?.allMatches ?? null,
+        llm_skipped: ao._skipLLM === true,
+        llm_skip_reason: ao._skipLLM ? (ao._skipLLMReason ?? 'Score keywords insuffisant') : null,
+        rag_sources_detail: ao.semanticDetails?.rag_sources ?? null,
+        decision_gate: ao.semanticDetails?.decision_gate ?? null,
+        confidence_decision: ao.semanticDetails?.confidence_decision ?? null,
+        rejet_raison: ao.semanticDetails?.rejet_raison ?? null,
+        human_readable_reason: buildHumanReadableReason(ao)
       }, {
         onConflict: 'source_id'
       });
@@ -1290,10 +1313,11 @@ const sendEmailStep = createStep({
         semanticReason: ao.semanticReason || ao.semantic_reason || 'Aucune justification disponible',
         priority: ao.priority === 'HIGH' ? 'HIGH' : 'MEDIUM',
         acheteur: ao.acheteur,
-        deadline: ao.deadline
+        deadline: ao.deadline,
+        source_id: ao.source_id,
       });
     });
-    
+
     // Ajouter HIGH et MEDIUM de MarchesOnline
     [...inputData.highBySource.MARCHESONLINE, ...inputData.mediumBySource.MARCHESONLINE].forEach(ao => {
       relevantAOs.push({
@@ -1303,7 +1327,8 @@ const sendEmailStep = createStep({
         semanticReason: ao.semanticReason || ao.semantic_reason || 'Aucune justification disponible',
         priority: ao.priority === 'HIGH' ? 'HIGH' : 'MEDIUM',
         acheteur: ao.acheteur,
-        deadline: ao.deadline
+        deadline: ao.deadline,
+        source_id: ao.source_id,
       });
     });
 

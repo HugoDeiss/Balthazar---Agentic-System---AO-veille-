@@ -1,8 +1,10 @@
 /**
  * Email Templates for AO Veille Workflow
- * 
+ *
  * Generates HTML email content for daily AO monitoring summaries.
  */
+
+import { signFeedbackToken } from './feedback-token';
 
 export interface EmailData {
   date: string; // Date ou plage pour l'affichage (YYYY-MM-DD ou since_until pour plage)
@@ -19,6 +21,7 @@ export interface EmailData {
     priority: 'HIGH' | 'MEDIUM';
     acheteur?: string;
     deadline?: string;
+    source_id?: string;
   }>;
   lowPriorityAOs: Array<{
     source: string;
@@ -188,6 +191,7 @@ export function generateEmailHTML(data: EmailData): string {
                 </p>
                 <p style="margin: 10px 0 0;">
                   <a href="${ao.url}" style="display: inline-block; background-color: #007bff; color: #ffffff; padding: 8px 16px; text-decoration: none; border-radius: 4px; font-size: 14px; font-weight: 500;">Voir l'appel d'offres →</a>
+                  ${ao.source_id ? `<a href="${process.env.MASTRA_URL}/api/feedback?ao_id=${ao.source_id}&token=${signFeedbackToken(ao.source_id)}" style="font-size: 11px; color: #aaa; display: block; margin-top: 6px;">❌ Signaler comme non pertinent</a>` : ''}
                 </p>
               </div>
               `).join('')}

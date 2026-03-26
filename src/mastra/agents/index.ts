@@ -6,4 +6,6 @@
 
 // Agents spécialisés pour l'analyse BOAMP
 export { boampSemanticAnalyzer } from "./boamp-semantic-analyzer";
+export { aoFeedbackTuningAgent } from "./ao-feedback-tuning-agent";
+export { aoFeedbackAgent } from "./ao-feedback-agent";
 
