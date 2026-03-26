@@ -1,4 +1,4 @@
-import { createWorkflow, createStep } from '../inngest';
+import { createWorkflow, createStep } from '@mastra/core/workflows';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { boampFetcherTool, type CanonicalAO } from '../tools/boamp-fetcher';
@@ -230,14 +230,8 @@ const fetchAndPrequalifyStep = createStep({
     
     // 3️⃣ Fetch MarchesOnline RSS (si configuré)
     let marchesonlineData = null;
-    // Priorité : paramètre input explicite > logique jour (mer/ven) > désactivé
-    const dayOfWeek = new Date().getDay(); // 0=dim, 1=lun, 3=mer, 5=ven
-    const isMarchesonlineDay = dayOfWeek === 3 || dayOfWeek === 5;
-    const rssUrls = inputData.marchesonlineRSSUrls !== undefined
-      ? inputData.marchesonlineRSSUrls
-      : isMarchesonlineDay
-        ? client.preferences.marchesonlineRSSUrls
-        : [];
+    // 🆕 Priorité : paramètre input > config client
+    const rssUrls = inputData.marchesonlineRSSUrls || client.preferences.marchesonlineRSSUrls;
     
     if (rssUrls && Array.isArray(rssUrls) && rssUrls.length > 0) {
       console.log(`📡 Fetching MarchesOnline RSS (${rssUrls.length} flux)...`);
@@ -2434,9 +2428,6 @@ export const aoVeilleWorkflow = createWorkflow({
     cancelled: z.number(),
     llmCalls: z.number()
   }),
-  cron: '0 6 * * 1-5',
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  inputData: { clientId: process.env.BALTHAZAR_CLIENT_ID! } as any,
 })
   // ═══════════════════════════════════════════════════════
   // PHASE 1 : COLLECTE & FILTRAGE GRATUIT (pas de LLM)

@@ -1,5 +1,5 @@
 import { Mastra } from "@mastra/core/mastra";
-import { serve, inngest } from "./inngest";
+import { createInngestHandler } from "./inngest";
 
 // Import agents
 import {
@@ -49,7 +49,7 @@ export const mastra = new Mastra({
       {
         path: '/api/inngest',
         method: 'ALL',
-        createHandler: async ({ mastra }) => serve({ mastra, inngest }),
+        createHandler: async ({ mastra }) => createInngestHandler(mastra),
       },
     ],
     cors: {
