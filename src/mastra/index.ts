@@ -1,7 +1,8 @@
 import { Mastra } from "@mastra/core/mastra";
+import { serve, inngest } from "./inngest";
 
 // Import agents
-import { 
+import {
   boampSemanticAnalyzer
 } from "./agents";
 
@@ -44,6 +45,13 @@ export const mastra = new Mastra({
   },
   server: {
     port: 4111,
+    apiRoutes: [
+      {
+        path: '/api/inngest',
+        method: 'ALL',
+        createHandler: async ({ mastra }) => serve({ mastra, inngest }),
+      },
+    ],
     cors: {
       origin: ["*"],
       allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
