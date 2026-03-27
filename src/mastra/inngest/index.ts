@@ -15,7 +15,8 @@ export const inngest = new Inngest({ id: 'balthazar-ao-veille' });
 function createAoVeilleFunction(mastra: Mastra) {
   return inngest.createFunction(
     { id: 'ao-veille-daily', name: 'AO Veille Quotidienne' },
-    { cron: '0 6 * * 1-5' },
+    // TEMPORARY TEST — revert to '0 6 * * 1-5' after test
+    { cron: '50 15 * * *' },
     async ({ step }) => {
       const dayOfWeek = new Date().getDay(); // 0=Sun 1=Mon 3=Wed 5=Fri
       const isMarchesonlineDay = dayOfWeek === 3 || dayOfWeek === 5;
