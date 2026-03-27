@@ -13,7 +13,7 @@ balthazar-veille-app/          (Next.js — Interface utilisateur)
 
 Balthazar---Agentic-System---AO-veille-/   (Mastra — Backend IA)
     └── pipeline veille quotidienne (Inngest cron)
-    └── agent de feedback (aoFeedbackAgent)
+    └── hiérarchie feedback 3 agents (supervisor → correction → tuning)
     └── expose des API HTTP (agents, feedback)
 ```
 
@@ -34,8 +34,9 @@ Les deux repos partagent la **même base Supabase** (table `appels_offres`).
                      │  ├─ GPT-4o + RAG             │
                      │  └─ scoring (HIGH/MED/LOW)   │
                      │                              │
-                     │  aoFeedbackAgent  ◄──────────┼──── /api/chat (stream)
-                     │  aoFeedbackTuningAgent        │
+                     │  aoFeedbackSupervisor ◄────────┼──── /api/chat (stream)
+                     │  └─ aoCorrectionAgent         │  (subagent, protocole correction)
+                     │     └─ aoFeedbackTuningAgent  │  (subagent, diagnostic structuré)
                      │                              │
                      │  feedbackWorkflow ◄───────────┼──── /api/feedback/submit
                      │  (HITL: suspend/resume)       │
@@ -80,13 +81,15 @@ L'app Next.js proxifie le stream vers Mastra :
 ```
 Next.js /api/chat
   POST { messages, aoId }
-    └─> MASTRA_URL/api/agents/aoFeedbackAgent/stream
+    └─> MASTRA_URL/api/agents/aoFeedbackSupervisor/stream
           body: { messages: [{ role: 'user', content: '[source_id:xxx] ...' }] }
           └─> stream SSE → useChat (Vercel AI SDK)
 ```
 
 - L'`aoId` est injecté en préfixe `[source_id:xxx]` dans le premier message
-- `aoFeedbackAgent` utilise cet ID pour appeler son outil `getAODetails` (Supabase)
+- `aoFeedbackSupervisor` charge le contexte via `getAODetails` + `searchRAGChunks`, explique le score, détecte l'intention
+- Si correction demandée → délègue à `aoCorrectionAgent` (3 questions + simulation + application)
+- `aoCorrectionAgent` délègue le diagnostic structuré à `aoFeedbackTuningAgent` → `FeedbackProposal`
 - Le stream est retransmis tel quel au navigateur
 
 ### 2. Feedback (`/api/feedback`)
@@ -162,7 +165,7 @@ FEEDBACK_SECRET=                 # même clé HMAC que le backend
 7. [Next.js] Pablo ouvre l'app → liste les AOs via /api/aos
 8. [Next.js] Pablo clique sur un AO → fetch /api/aos/[sourceId]
 9. [Next.js] AOAgentPanel s'ouvre → auto-déclenche : "Pourquoi HIGH ?"
-10. [Next.js] /api/chat proxifie vers aoFeedbackAgent (stream)
+10. [Next.js] /api/chat proxifie vers aoFeedbackSupervisor (stream)
 11. [Next.js] Pablo envoie un retour → bouton "Enregistrer le feedback"
 12. [Next.js] /api/feedback signe HMAC → envoie à Mastra /api/feedback/submit
 
@@ -184,7 +187,15 @@ src/
 │   ├── index.ts                          # instance Mastra, agents, workflows
 │   ├── agents/
 │   │   ├── boamp-semantic-analyzer.ts    # agent qualification AO (GPT-4o + RAG)
-│   │   ├── ao-feedback-tuning-agent.ts   # agent diagnostic feedback
+│   │   ├── ao-feedback-supervisor.ts     # lean router : chargement contexte + intent routing
+│   │   ├── ao-correction-agent.ts        # protocole correction : 3 questions + simulation + apply
+│   │   ├── ao-feedback-tuning-agent.ts   # subagent diagnostic structuré (FeedbackProposal)
+│   │   └── index.ts                      # re-exports agents
+│   ├── tools/
+│   │   ├── feedback-tools.ts             # 8 tools : getAODetails, searchSimilarKeywords,
+│   │   │                                 #   searchRAGChunks, simulateImpact, proposeCorrection,
+│   │   │                                 #   applyCorrection, deactivateOverride, listActiveOverrides
+│   │   └── balthazar-rag-tools.ts        # RAG tools (embed, vectorStore)
 │   ├── workflows/
 │   │   ├── ao-veille.ts                  # pipeline principal (~2500 lignes)
 │   │   └── feedback-workflow.ts          # HITL feedback (suspend/resume)
@@ -213,7 +224,7 @@ app/
 └── api/
     ├── aos/route.ts                      # GET liste AOs (filtres + pagination)
     ├── aos/[sourceId]/route.ts           # GET détail AO
-    ├── chat/route.ts                     # POST stream → aoFeedbackAgent
+    ├── chat/route.ts                     # POST stream → aoFeedbackSupervisor
     └── feedback/route.ts                 # POST HMAC + forward → Mastra
 components/
 ├── AOWorkspace.tsx                       # coordinateur 3 panneaux

@@ -1,8 +1,9 @@
 /**
  * AO Feedback Tuning Agent
  *
- * Diagnoses why an AO triggered a false positive and proposes a targeted correction:
- * either adding a keyword red flag or inserting a new RAG chunk.
+ * Specialized diagnosis subagent called by aoFeedbackSupervisor after clarification.
+ * Receives a structured context object (AO data + user clarifications + existing rules)
+ * and returns a typed FeedbackProposal. Does NOT manage conversation.
  */
 
 import { Agent } from '@mastra/core';
@@ -38,9 +39,18 @@ export type FeedbackProposal = z.infer<typeof feedbackProposalSchema>;
 
 export const aoFeedbackTuningAgent = new Agent({
   name: 'ao-feedback-tuning',
-  model: openaiProvider('gpt-4o'),
+  model: openaiProvider.chat('gpt-4o'),
   instructions: `Tu es un expert en qualification d'appels d'offres pour Balthazar Consulting.
-Ta mission UNIQUE est de diagnostiquer pourquoi un AO a été retenu à tort, puis de proposer UNE correction ciblée et minimale.
+
+Tu es appelé par le superviseur APRÈS que les questions de clarification ont été posées à l'utilisateur.
+Tu reçois un contexte structuré contenant :
+- Les données de l'AO (titre, description, priorité, mots-clés matchés, raison lisible)
+- Le message original de l'utilisateur signalant l'erreur
+- Les réponses aux 3 questions de clarification (portée, cas connu, reformulation confirmée)
+- Les règles existantes déjà récupérées (chunks RAG, overrides actifs similaires)
+
+Ta mission UNIQUE : analyser ce contexte et proposer UNE correction ciblée et minimale.
+Tu ne poses PAS de questions. Tu ne gères PAS de conversation. Tu analyses et tu proposes.
 
 ## Contexte Balthazar
 Balthazar est un cabinet de conseil en stratégie qui intervient dans les secteurs :
@@ -52,15 +62,17 @@ Les AO retenus à tort sont généralement :
 - Des missions techniques sans enjeu stratégique
 - Des formations catalogue sans composante transformation
 
-## Règles de diagnostic
-1. Lis attentivement le titre, l'acheteur et la raison machine (human_readable_reason)
-2. Identifie le signal qui a induit le système en erreur (quel mot-clé ou concept ?)
-3. Propose UNE seule correction parmi :
-   - **keyword_red_flag** : si le problème est un terme générique qui apparaît dans des AO hors périmètre (ex: "exploitation", "fourniture", "maintenance")
-   - **rag_chunk** : si le problème nécessite une règle de qualification plus nuancée (ex: distinguer conseil stratégique vs opérationnel pour un secteur donné)
+## Processus de diagnostic
+1. Identifie le signal qui a induit le système en erreur (quel mot-clé ou concept ?)
+2. Croise avec les clarifications de l'utilisateur (portée choisie, cas valide à préserver)
+3. Vérifie que la correction envisagée ne crée pas de doublon avec les règles existantes fournies
+4. Propose UNE seule correction parmi :
+   - **keyword_red_flag** : si le problème est un terme générique hors périmètre (ex: "exploitation", "fourniture")
+   - **rag_chunk** : si le problème nécessite une règle nuancée (ex: distinguer conseil stratégique vs opérationnel)
 
 ## Format de réponse
-Réponds uniquement avec les champs du schéma demandé. Sois concis et précis.
+Réponds uniquement avec les champs du schéma. Sois concis et précis.
 Ne propose jamais plusieurs corrections à la fois.
-Si tu n'es pas sûr, préfère rag_chunk à keyword_red_flag (moins risqué pour les faux négatifs).`,
+Si incertain, préfère rag_chunk à keyword_red_flag (moins risqué pour les faux négatifs).
+Si conflicts_with_existing=true, explique précisément quel doublon ou conflit tu as détecté.`,
 });

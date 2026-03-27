@@ -115,10 +115,12 @@ Le tableau ci-dessous est la **carte de travail** pour l’implémentation. Les 
 | **F. Re-scoring ciblé** | Rejouer le pipeline sur **N AO** uniquement | **`createWorkflow`** dédié `feedback-recheck-workflow` qui : (1) charge la config à jour, (2) pour chaque AO id en entrée, enchaîne les mêmes étapes que `processOneAOWorkflow` / `analyzeAOCompleteWorkflow` (ou **workflow imbriqué** `.then(existingSubWorkflow)`), (3) écrit résultats comparatifs. | Aujourd’hui la logique riche est dans `src/mastra/workflows/ao-veille.ts` — **factoriser** ou **appeler** le sous-workflow existant évite la dérive. |
 | **G. Planification / file d’attente** | Ne pas bloquer l’UI sur le LLM long | **Inngest** (déjà utilisé pour la veille) : événement `ao.feedback.submitted` → step qui démarre le workflow feedback. | Même pattern que `src/mastra/inngest/index.ts` + `mastra.getWorkflow(...)`. |
 
-### 5.1 Agent existant vs agent feedback
+### 5.1 Agent existant vs agents feedback
 
 - **`boampSemanticAnalyzer`** : qualification d’un AO (axes fit, `decision_gate`, RAG policies / case studies). **Ne pas surcharger** avec la logique « modification des règles ».
-- **Nouvel agent (nom indicatif `aoFeedbackTuningAgent`)** : entrée = texte utilisateur + contexte AO + extrait keywords/corpus ; sortie = proposition structurée + formulation utilisateur. Tools orientés **lecture** et **recherche de doublons** (requêtes vectorielles ou grep sur liste de keywords selon votre stockage).
+- **`aoFeedbackSupervisor`** *(lean router)* : point d’entrée unique du chat. Instructions ~15 lignes. 3 tools seulement (`getAODetails`, `searchRAGChunks`, `listActiveOverrides`). Charge le contexte, explique le score en langage métier, détecte l’intention, délègue les corrections à `aoCorrectionAgent`. Ne fait jamais de diagnostic ni de correction lui-même.
+- **`aoCorrectionAgent`** *(implémenté)* : gère le protocole de correction. 5 tools (`simulateImpact`, `searchSimilarKeywords`, `proposeCorrection`, `applyCorrection`, `deactivateOverride`). Pose 3 questions de clarification une à la fois, délègue le diagnostic à `aoFeedbackTuningAgent`, simule l’impact, applique après confirmation explicite. Agent interne — non exposé comme route HTTP publique.
+- **`aoFeedbackTuningAgent`** *(inchangé)* : subagent de diagnostic structuré. Reçoit un objet structuré (AO + clarifications Pablo + règles existantes) depuis `aoCorrectionAgent`. Produit un `FeedbackProposal` typé (`diagnosis_fr`, `correction_type`, `technical_payload`, `impact_fr`). Ne gère pas de conversation, pas de tools.
 
 ### 5.2 RAG et réindexation
 
@@ -205,14 +207,18 @@ Dans Cursor, le serveur MCP est configuré pour lancer :
 
 ## 11. Fichiers du dépôt pertinents aujourd’hui
 
-| Fichier | Rôle |
-|---------|------|
-| `src/mastra/index.ts` | Enregistrement `mastra` : agents + workflows ; `apiRoutes` (ex. étendre pour HITL / feedback). |
-| `src/mastra/workflows/ao-veille.ts` | Pipeline veille, `processOneAOWorkflow`, `analyzeAOCompleteWorkflow`, keywords, scoring. |
-| `src/mastra/agents/boamp-semantic-analyzer.ts` | Agent sémantique RAG actuel (référence pour traces à persister). |
-| `src/mastra/tools/balthazar-rag-tools.ts` | Outils RAG existants — modèle pour les tools « lecture / recherche overlap ». |
-| `src/mastra/inngest/index.ts` | Pattern Inngest + `mastra.getWorkflow` pour jobs asynchrones. |
-| `INNGEST.md` | Rappel config cron / URL `/api/inngest`. |
+| Fichier | Rôle | Statut |
+|---------|------|--------|
+| `src/mastra/index.ts` | Enregistrement `mastra` : agents + workflows ; `apiRoutes`. | ✅ Mis à jour |
+| `src/mastra/agents/ao-feedback-supervisor.ts` | Lean router — chargement contexte, explication score, intent routing. 3 tools, 1 subagent. | ✅ Refactorisé |
+| `src/mastra/agents/ao-correction-agent.ts` | Protocole correction — 3 questions, délégation diagnostic, simulation impact, apply. 5 tools, 1 subagent. | ✅ Créé |
+| `src/mastra/agents/ao-feedback-tuning-agent.ts` | Subagent diagnostic — reçoit contexte structuré, retourne `FeedbackProposal`. Aucun tool. | ✅ Inchangé |
+| `src/mastra/tools/feedback-tools.ts` | 8 tools feedback : getAODetails, searchSimilarKeywords, searchRAGChunks, simulateImpact, proposeCorrection, applyCorrection, deactivateOverride, listActiveOverrides. | ✅ Inchangé |
+| `src/mastra/workflows/ao-veille.ts` | Pipeline veille, `processOneAOWorkflow`, `analyzeAOCompleteWorkflow`, keywords, scoring. | — |
+| `src/mastra/agents/boamp-semantic-analyzer.ts` | Agent sémantique RAG actuel (référence pour traces à persister). | — |
+| `src/mastra/tools/balthazar-rag-tools.ts` | Outils RAG existants — embed, vectorStore, singleton. | — |
+| `src/mastra/inngest/index.ts` | Pattern Inngest + `mastra.getWorkflow` pour jobs asynchrones. | — |
+| `INNGEST.md` | Rappel config cron / URL `/api/inngest`. | — |
 
 ---
 

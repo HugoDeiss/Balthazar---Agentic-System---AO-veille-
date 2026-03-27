@@ -1,14 +1,15 @@
 /**
  * Feedback Tools for aoFeedbackAgent
  *
- * 4 tools that power the chat-based feedback loop:
- * getAODetails → searchSimilarKeywords → proposeCorrection → applyCorrection
+ * 6 tools that power the chat-based feedback loop:
+ * getAODetails → searchSimilarKeywords / searchRAGChunks → simulateImpact → proposeCorrection → applyCorrection
  */
 
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { insertAndIndexChunk } from '../../utils/rag-indexer';
+import { embedQuery, getVectorStore } from './balthazar-rag-tools';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -103,7 +104,85 @@ export const searchSimilarKeywords = createTool({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tool 3 — proposeCorrection
+// Tool 3 — searchRAGChunks (policies index, same mechanism as balthazarPoliciesQueryTool)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const policiesFilterTypeEnum = z.enum([
+  'sector_definition',
+  'mandate_type',
+  'exclusion_rule',
+  'conditional_rule',
+  'priority_rule',
+  'disambiguation_rule',
+]);
+
+export const searchRAGChunks = createTool({
+  id: 'searchRAGChunks',
+  description:
+    "Recherche sémantique dans le corpus RAG policies (pgvector, index « policies »). À utiliser avant de proposer un nouveau chunk pour vérifier les règles ou formulations déjà présentes et éviter les doublons.",
+  inputSchema: z.object({
+    query: z.string().describe('Requête sémantique (sujet de la règle, mots-clés, contexte métier)'),
+    filter_type: policiesFilterTypeEnum
+      .optional()
+      .nullable()
+      .describe(
+        'Filtre optionnel sur metadata.type (même schéma que l’index policies). Omettre pour chercher dans tout le corpus.',
+      ),
+    topK: z
+      .number()
+      .optional()
+      .default(5)
+      .describe('Nombre de chunks à retourner (défaut 5)'),
+  }),
+  execute: async ({ context }) => {
+    const { query, filter_type, topK } = context;
+
+    try {
+      const queryVector = await embedQuery(query);
+      const store = getVectorStore();
+
+      const results = await store.query({
+        indexName: 'policies',
+        queryVector,
+        topK,
+        filter: filter_type ? { type: { $eq: filter_type } } : undefined,
+        includeVector: false,
+      });
+
+      const chunks = results.map(r => ({
+        chunk_id: (r.metadata?.chunk_id as string) || r.id,
+        score: r.score ?? 0,
+        text: (r.metadata?.text as string) || '',
+        metadata: r.metadata || {},
+      }));
+
+      return {
+        status: 'ok' as const,
+        query,
+        chunks,
+        count: chunks.length,
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[searchRAGChunks] store.query failed:', message);
+      return {
+        status: 'error' as const,
+        query,
+        error: message,
+        chunks: [] as Array<{
+          chunk_id: string;
+          score: number;
+          text: string;
+          metadata: Record<string, unknown>;
+        }>,
+        count: 0,
+      };
+    }
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tool 4 — proposeCorrection
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const proposeCorrection = createTool({
@@ -162,7 +241,84 @@ export const proposeCorrection = createTool({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tool 4 — applyCorrection
+// Tool 5 — simulateImpact
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const simulateImpact = createTool({
+  id: 'simulateImpact',
+  description: `Simule l'impact d'un nouveau red flag sur les AOs récents.
+Appelle cet outil APRÈS les questions de clarification et AVANT proposeCorrection.
+Retourne deux catégories : AOs correctement exclus (LOW) et AOs potentiellement exclus à tort (HIGH/MEDIUM).
+Présente le résultat à l'utilisateur avant de continuer.`,
+  inputSchema: z.object({
+    term: z.string().describe("Terme à tester comme red flag (ex: 'stratégie achats')"),
+    days_back: z.number().default(30).describe('Fenêtre temporelle en jours (défaut: 30)'),
+  }),
+  outputSchema: z.object({
+    total_affected: z.number(),
+    correctly_excluded: z.array(z.object({
+      source_id: z.string(),
+      title: z.string(),
+      priority: z.string().nullable(),
+      reason: z.string(),
+    })),
+    potentially_wrong: z.array(z.object({
+      source_id: z.string(),
+      title: z.string(),
+      priority: z.string().nullable(),
+      reason: z.string(),
+    })),
+    summary: z.string(),
+  }),
+  execute: async ({ context }) => {
+    const since = new Date();
+    since.setDate(since.getDate() - context.days_back);
+
+    const { data } = await supabase
+      .from('appels_offres')
+      .select('source_id, title, priority')
+      .gte('analyzed_at', since.toISOString())
+      .or(`title.ilike.%${context.term}%,description.ilike.%${context.term}%`);
+
+    const affected = data ?? [];
+
+    const correctly_excluded = affected
+      .filter(ao => ao.priority === 'LOW' || ao.priority === null)
+      .map(ao => ({
+        source_id: ao.source_id,
+        title: ao.title,
+        priority: ao.priority,
+        reason: "AO déjà classé LOW — l'exclusion ne change rien de visible",
+      }));
+
+    const potentially_wrong = affected
+      .filter(ao => ao.priority === 'HIGH' || ao.priority === 'MEDIUM')
+      .map(ao => ({
+        source_id: ao.source_id,
+        title: ao.title,
+        priority: ao.priority,
+        reason: `AO classé ${ao.priority} — à vérifier avant de confirmer l'exclusion`,
+      }));
+
+    const summaryLines: string[] = [`${affected.length} AO(s) affecté(s) sur les ${context.days_back} derniers jours.`];
+    if (correctly_excluded.length > 0) {
+      summaryLines.push(`✅ ${correctly_excluded.length} correctement exclus (déjà LOW).`);
+    }
+    if (potentially_wrong.length > 0) {
+      summaryLines.push(`⚠️ ${potentially_wrong.length} à vérifier (HIGH/MEDIUM) : ${potentially_wrong.map(a => `"${a.title}"`).join(', ')}.`);
+    }
+
+    return {
+      total_affected: affected.length,
+      correctly_excluded,
+      potentially_wrong,
+      summary: summaryLines.join(' '),
+    };
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tool 6 — applyCorrection
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const applyCorrection = createTool({
@@ -230,6 +386,113 @@ export const applyCorrection = createTool({
     return {
       applied: true,
       message: "✅ Correction appliquée. Elle sera active dès le prochain run d'analyse (demain matin à 6h).",
+    };
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tool 7 — deactivateOverride
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const deactivateOverride = createTool({
+  id: 'deactivateOverride',
+  description: `Désactive un keyword override existant dans keyword_overrides.
+Utilise cet outil quand l'utilisateur signale qu'une règle précédemment ajoutée exclut des AOs qui devraient passer.
+La règle est désactivée (active=false) mais conservée pour l'audit.`,
+  inputSchema: z.object({
+    override_id: z.string().optional().describe("UUID de l'override à désactiver"),
+    value: z.string().optional().describe("Valeur du keyword à désactiver si pas d'ID"),
+    client_id: z.string().default('balthazar'),
+    reason: z.string().describe('Pourquoi on désactive cette règle'),
+  }),
+  outputSchema: z.object({
+    deactivated: z.boolean(),
+    message: z.string(),
+    affected_rule: z.object({
+      value: z.string(),
+      type: z.string(),
+    }).nullable(),
+  }),
+  execute: async ({ context }) => {
+    if (!context.override_id && !context.value) {
+      return { deactivated: false, message: 'Fournir override_id ou value.', affected_rule: null };
+    }
+
+    let query = supabase
+      .from('keyword_overrides')
+      .update({ active: false })
+      .eq('client_id', context.client_id)
+      .eq('active', true);
+
+    if (context.override_id) {
+      query = query.eq('id', context.override_id);
+    } else {
+      query = query.ilike('value', `%${context.value}%`);
+    }
+
+    const { data, error } = await query.select().single();
+
+    if (error || !data) {
+      return { deactivated: false, message: 'Override non trouvé ou déjà inactif.', affected_rule: null };
+    }
+
+    return {
+      deactivated: true,
+      message: `Règle "${data.value}" désactivée. Elle ne s'appliquera plus dès le prochain run.`,
+      affected_rule: { value: data.value, type: data.type },
+    };
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tool 8 — listActiveOverrides
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const listActiveOverrides = createTool({
+  id: 'listActiveOverrides',
+  description: `Liste toutes les règles de filtrage actives (keyword overrides).
+Utilise cet outil quand l'utilisateur demande à voir les règles existantes,
+ou quand tu suspectes qu'une règle précédente cause des effets de bord.`,
+  inputSchema: z.object({
+    client_id: z.string().default('balthazar'),
+    type: z.enum(['red_flag', 'required_keyword', 'all']).default('all'),
+  }),
+  outputSchema: z.object({
+    overrides: z.array(z.object({
+      id: z.string(),
+      type: z.string(),
+      value: z.string(),
+      reason: z.string().nullable(),
+      created_at: z.string(),
+    })),
+    total: z.number(),
+    summary: z.string(),
+  }),
+  execute: async ({ context }) => {
+    let query = supabase
+      .from('keyword_overrides')
+      .select('id, type, value, reason, created_at')
+      .eq('client_id', context.client_id)
+      .eq('active', true)
+      .order('created_at', { ascending: false });
+
+    if (context.type !== 'all') {
+      query = query.eq('type', context.type);
+    }
+
+    const { data } = await query;
+    const overrides = data ?? [];
+
+    const summary = overrides.length === 0
+      ? 'Aucune règle personnalisée active pour le moment.'
+      : overrides.map((o, i) =>
+          `${i + 1}. [${o.type}] "${o.value}" — ${o.reason ?? 'aucune raison documentée'}`
+        ).join('\n');
+
+    return {
+      overrides,
+      total: overrides.length,
+      summary: `${overrides.length} règle(s) active(s) :\n${summary}`,
     };
   },
 });

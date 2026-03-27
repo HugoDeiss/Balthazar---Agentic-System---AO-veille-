@@ -29,7 +29,7 @@ import { resolve } from 'path';
 
 let _vectorStore: PgVector | null = null;
 
-function getVectorStore(): PgVector {
+export function getVectorStore(): PgVector {
   if (!_vectorStore) {
     console.log('[RAG] Initializing PgVector, DATABASE_URL present:', !!process.env.DATABASE_URL);
     _vectorStore = new PgVector({
@@ -39,9 +39,9 @@ function getVectorStore(): PgVector {
   return _vectorStore;
 }
 
-const EMBEDDING_MODEL = 'text-embedding-3-small';
+export const EMBEDDING_MODEL = 'text-embedding-3-small';
 
-async function embedQuery(query: string): Promise<number[]> {
+export async function embedQuery(query: string): Promise<number[]> {
   const { embeddings } = await embedMany({
     model: openaiProvider.embedding(EMBEDDING_MODEL),
     values: [query],

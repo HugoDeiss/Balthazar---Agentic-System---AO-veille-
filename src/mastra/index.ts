@@ -5,7 +5,7 @@ import { createInngestHandler } from "./inngest";
 import {
   boampSemanticAnalyzer,
   aoFeedbackTuningAgent,
-  aoFeedbackAgent,
+  aoFeedbackSupervisor,
 } from "./agents";
 
 // Import workflows
@@ -33,6 +33,8 @@ import {
  * 
  * Agents:
  * - boampSemanticAnalyzer: Semantic analysis of BOAMP tenders (Step 2b) - uses GPT-4o-mini
+ * - aoFeedbackTuningAgent: Diagnosis subagent — produces FeedbackProposal from structured context
+ * - aoFeedbackSupervisor: Conversational supervisor — manages chat with Pablo, delegates diagnosis
  * 
  * Workflows:
  * - aoVeilleWorkflow: Complete pipeline from BOAMP fetch to analysis and storage
@@ -41,7 +43,7 @@ export const mastra = new Mastra({
   agents: {
     boampSemanticAnalyzer,
     aoFeedbackTuningAgent,
-    aoFeedbackAgent,
+    aoFeedbackSupervisor,
   },
   workflows: {
     aoVeilleWorkflow,
@@ -56,7 +58,11 @@ export const mastra = new Mastra({
     ],
   },
   server: {
-    port: 4111,
+    /** Override with `MASTRA_PORT` if 4111 is already taken (set same port in `MASTRA_URL` for Next.js). */
+    port: (() => {
+      const n = Number(process.env.MASTRA_PORT);
+      return Number.isFinite(n) && n > 0 ? n : 4111;
+    })(),
     apiRoutes: [
       {
         path: '/api/inngest',
