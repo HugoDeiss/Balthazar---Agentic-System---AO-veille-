@@ -12,12 +12,22 @@ Balthazar est un système de veille automatisé basé sur l'architecture **Mastr
 - ✅ **Analyse** la pertinence et la faisabilité via un **agent IA RAG** (règles Balthazar + GPT-4o)
 - ✅ **Score** et priorise les opportunités (HIGH, MEDIUM, LOW)
 - ✅ **Sauvegarde** les résultats dans Supabase pour exploitation
+- ✅ **Intègre** le feedback utilisateur pour améliorer en continu le RAG
+
+**Ce repo est le backend.** L'interface utilisateur est dans un repo séparé : `balthazar-veille-app` (Next.js). Voir **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** pour la vue d'ensemble des deux repos et leurs connexions.
 
 ---
 
-## 🏗️ Architecture Système Agentique
+## 🏗️ Architecture Système
 
-Le système utilise le framework **Mastra** qui orchestre trois composants principaux :
+Le système est composé de **deux repos** :
+
+| Repo | Rôle | Stack |
+|------|------|-------|
+| `Balthazar---Agentic-System---AO-veille-` | Backend IA : pipeline veille, agents, feedback | Mastra + Inngest |
+| `balthazar-veille-app` | Interface utilisateur : dashboard AOs, chat IA | Next.js + Vercel AI SDK |
+
+Les deux partagent la même base **Supabase** (`appels_offres`). La Next.js app appelle Mastra Cloud via HTTP pour le chat et le feedback. **→ [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)**
 
 ### Composants Mastra
 
@@ -88,6 +98,26 @@ sequenceDiagram
     Workflow->>Supabase: Sauvegarde résultats
     Supabase-->>Client: Statistiques (HIGH, MEDIUM, LOW)
 ```
+
+---
+
+## 🖥️ Interface Utilisateur (`balthazar-veille-app`)
+
+L'app Next.js est un dashboard 3 panneaux pour consulter et qualifier les AOs :
+
+- **Gauche** — Liste des AOs avec filtres (priorité, période, pagination)
+- **Centre** — Détail AO : scores, keywords détectés, raison de décision
+- **Droite** — Chat avec `aoFeedbackAgent` (auto-déclenché à l'ouverture)
+
+### Connexions vers ce backend
+
+| Route Next.js | Cible Mastra |
+|---------------|-------------|
+| `POST /api/chat` | `MASTRA_URL/api/agents/aoFeedbackAgent/stream` |
+| `POST /api/feedback` | `MASTRA_URL/api/feedback/submit` (HMAC-SHA256) |
+| `GET /api/aos*` | Supabase direct (service key) |
+
+Voir **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** pour le détail des flux et variables d'environnement.
 
 ---
 
@@ -412,6 +442,10 @@ RESEND_API_KEY=re_...
 
 # Tests locaux : redirige les emails vers cette adresse au lieu des destinataires prod
 # RESEND_TO_OVERRIDE=you@example.com
+
+# Feedback (doit être identique dans balthazar-veille-app)
+FEEDBACK_SECRET=<clé 32 chars>
+MASTRA_URL=https://balthazar-tender-monitoring.mastra.cloud
 ```
 
 ### Initialiser la Base de Données
@@ -450,9 +484,14 @@ Le serveur Mastra démarre sur `http://localhost:4111` (port configuré dans `sr
 
 ## 📚 Documentation
 
+### Architecture
+
+- **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** — Vue d’ensemble deux repos, flux de données, variables d’environnement
+
 ### Référence technique
 
 - **[docs/RAG_ET_EVALS.md](./docs/RAG_ET_EVALS.md)** — RAG Balthazar (corpus, indexation, outils), packs d’évaluation et état du système
+- **[docs/FEEDBACK_AO_VISION_ET_MASTRA.md](./docs/FEEDBACK_AO_VISION_ET_MASTRA.md)** — Vision produit et architecture du système de feedback HITL
 - **[BOAMP_FETCH.md](./BOAMP_FETCH.md)** — Outil BOAMP
 - **[MARCHESONLINE_RSS_FETCH.md](./MARCHESONLINE_RSS_FETCH.md)** — Outil MarchesOnline RSS
 - **[WORKFLOW_AO_VEILLE.md](./WORKFLOW_AO_VEILLE.md)** — Workflow d’analyse AO
@@ -461,7 +500,6 @@ Le serveur Mastra démarre sur `http://localhost:4111` (port configuré dans `sr
 ### Déploiement et automatisation
 
 - **[INNGEST.md](./INNGEST.md)** — Planification quotidienne en production (Inngest + Mastra Cloud)
-- **[GITHUB_WORKFLOW_QUOTIDIEN.md](./GITHUB_WORKFLOW_QUOTIDIEN.md)** — Archivé : ancien workflow GitHub (supprimé)
 - **[docs/TESTS_AVANT_COMMIT.md](./docs/TESTS_AVANT_COMMIT.md)** — Tests et checklist avant commit / modification du workflow
 - **[DEPLOIEMENT_MASTRA_CLOUD.md](./DEPLOIEMENT_MASTRA_CLOUD.md)** — Déploiement Mastra Cloud
 

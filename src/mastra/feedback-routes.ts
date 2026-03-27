@@ -8,7 +8,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { verifyFeedbackToken, signFeedbackToken } from '../utils/feedback-token';
-import { inngest } from '../inngest';
+import { inngest } from './inngest';
 import type { Mastra } from '@mastra/core/mastra';
 
 const supabase = createClient(
