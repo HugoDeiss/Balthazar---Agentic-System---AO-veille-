@@ -29,12 +29,24 @@ function createAoVeilleFunction(mastra: Mastra) {
       return step.run('run-ao-veille', async () => {
         const workflow = mastra.getWorkflow('aoVeilleWorkflow');
         const run = await workflow.createRunAsync();
-        return run.start({
-          inputData: {
-            clientId: process.env.BALTHAZAR_CLIENT_ID!,
-            ...(marchesonlineRSSUrls && { marchesonlineRSSUrls }),
-          },
-        });
+
+        // Fire and forget — do NOT await run.start()
+        // The workflow runs async in Mastra Cloud's own execution engine.
+        run
+          .start({
+            inputData: {
+              clientId: process.env.BALTHAZAR_CLIENT_ID!,
+              ...(marchesonlineRSSUrls && { marchesonlineRSSUrls }),
+            },
+          })
+          .catch((err: unknown) => {
+            console.error(
+              '[inngest] aoVeilleWorkflow start error:',
+              err instanceof Error ? err.message : err,
+            );
+          });
+
+        return { triggered: true, timestamp: new Date().toISOString() };
       });
     },
   );
