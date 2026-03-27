@@ -16,7 +16,7 @@ import {
   handleFeedbackForm,
   handleFeedbackSubmit,
   handleFeedbackConfirm,
-} from "./server/feedback-handlers";
+} from "./feedback-routes";
 
 /**
  * Balthazar Tender Monitoring System

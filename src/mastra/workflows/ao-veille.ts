@@ -7,8 +7,8 @@ import {
   isRectification,
   findOriginalAO,
   detectSubstantialChanges
-} from './rectificatif-utils';
-import { checkBatchAlreadyAnalyzed } from '../../persistence/ao-persistence';
+} from '../../utils/rectificatif-utils';
+import { checkBatchAlreadyAnalyzed } from '../persistence/ao-persistence';
 import { scheduleRetry } from '../../utils/retry-scheduler';
 import { calculateKeywordScore, calculateEnhancedKeywordScore, shouldSkipLLM } from '../../utils/balthazar-keywords';
 import { analyzeSemanticRelevance, DEFAULT_FALLBACK_ANALYSIS, type BalthazarSemanticAnalysis } from '../agents/boamp-semantic-analyzer';

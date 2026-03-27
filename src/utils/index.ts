@@ -9,3 +9,4 @@ export * from './retry-scheduler';
 export * from './balthazar-keywords';
 export * from './email-templates';
 export * from './email-sender';
+export * from './rectificatif-utils';
