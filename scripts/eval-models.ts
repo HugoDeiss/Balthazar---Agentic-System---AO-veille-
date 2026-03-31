@@ -26,7 +26,7 @@ const MODELS = [
   {
     id: 'gpt-4o',
     label: 'gpt-4o (baseline)',
-    // Source: platform.openai.com/docs/pricing — à vérifier si les prix ont changé
+    // Source: platform.openai.com/docs/pricing — standard pricing
     priceInputPer1M: 2.50,
     priceOutputPer1M: 10.00,
     tpmTier1: 30_000,
@@ -41,8 +41,8 @@ const MODELS = [
   {
     id: 'gpt-5-mini',
     label: 'gpt-5-mini',
-    priceInputPer1M: 1.10,   // ⚠️ À VÉRIFIER sur platform.openai.com/docs/pricing
-    priceOutputPer1M: 4.40,  // ⚠️ À VÉRIFIER
+    priceInputPer1M: 0.25,
+    priceOutputPer1M: 2.00,
     tpmTier1: 500_000,
   },
 ] as const;
