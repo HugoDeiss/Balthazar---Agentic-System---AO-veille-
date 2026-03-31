@@ -278,8 +278,8 @@ export const DEFAULT_FALLBACK_ANALYSIS: BalthazarSemanticAnalysis = {
 // ──────────────────────────────────────────────────
 
 const MAX_RETRIES_RATE_LIMIT = 3;
-const BACKOFF_BASE_MS = 12_000;   // 12s
-const BACKOFF_JITTER_MS = 8_000;  // +0–8s aléatoire → 12–20s total
+const BACKOFF_BASE_MS = 65_000;   // 65s — dépasse la fenêtre TPM de 60s (les requêtes échouées consomment du TPM, retry avant reset = garanti 429)
+const BACKOFF_JITTER_MS = 15_000; // +0–15s aléatoire → 65–80s total
 
 /** Détecte si l'erreur provient d'un rate limit OpenAI (429 / TPM dépassé) */
 function isRateLimitError(error: unknown): boolean {
