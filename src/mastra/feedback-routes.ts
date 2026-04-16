@@ -86,21 +86,30 @@ export async function handleFeedbackForm(req: Request): Promise<Response> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function handleFeedbackSubmit(req: Request): Promise<Response> {
-  let body: Record<string, string>;
+  // Accept both JSON (dashboard chat button) and form-encoded (email form HTML)
+  let aoId: string, token: string, reason: string;
   try {
-    const formData = await req.formData();
-    body = Object.fromEntries(formData.entries()) as Record<string, string>;
+    const contentType = req.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json')) {
+      const json = await req.json();
+      aoId = json.ao_id ?? '';
+      token = json.token ?? '';
+      reason = json.reason ?? '';
+    } else {
+      const formData = await req.formData();
+      aoId = formData.get('ao_id')?.toString() ?? '';
+      token = formData.get('token')?.toString() ?? '';
+      reason = formData.get('reason')?.toString() ?? '';
+    }
   } catch {
     return new Response('Requête invalide.', { status: 400 });
   }
-
-  const { ao_id: aoId, token, reason } = body;
 
   if (!aoId || !token || !verifyFeedbackToken(aoId, token)) {
     return new Response('Lien invalide ou expiré.', { status: 400 });
   }
 
-  // Insert feedback
+  // Insert feedback (source='email' = triggered from email form or dashboard feedback button)
   const { data: feedback, error } = await supabase
     .from('ao_feedback')
     .insert({
@@ -109,6 +118,7 @@ export async function handleFeedbackSubmit(req: Request): Promise<Response> {
       feedback: 'not_relevant',
       reason: reason ?? '',
       status: 'draft',
+      source: 'email',
     })
     .select('id')
     .single();

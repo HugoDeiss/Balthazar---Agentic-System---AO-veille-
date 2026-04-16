@@ -1,8 +1,20 @@
 /**
  * Feedback Tools for aoFeedbackAgent
  *
- * 6 tools that power the chat-based feedback loop:
+ * 8 tools that power the chat-based feedback loop:
  * getAODetails → searchSimilarKeywords / searchRAGChunks → simulateImpact → proposeCorrection → applyCorrection
+ *
+ * ## ao_feedback state machine
+ *
+ * CHAT path (this file — used by aoFeedbackSupervisor / aoCorrectionAgent):
+ *   source='chat' | agent_proposed (proposeCorrection) →
+ *     applied (applyCorrection, approved=true) | rejected (applyCorrection, approved=false)
+ *
+ * EMAIL path (feedback-workflow.ts — triggered via Inngest event ao.feedback.submitted):
+ *   source='email' | draft (handleFeedbackSubmit) →
+ *     agent_proposed (workflow step agent-propose) →
+ *     awaiting_confirm (workflow step user-confirm, email sent) →
+ *     applied (apply-correction, confirmed) | rejected (apply-correction, refused)
  */
 
 import { createTool } from '@mastra/core/tools';
@@ -229,6 +241,7 @@ export const proposeCorrection = createTool({
         agent_diagnosis: context.diagnosis_fr,
         agent_proposal: context.proposal_fr,
         status: 'agent_proposed',
+        source: 'chat',
       })
       .select()
       .single();
