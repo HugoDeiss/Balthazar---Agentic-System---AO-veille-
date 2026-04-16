@@ -1,4 +1,5 @@
 import { Mastra } from "@mastra/core/mastra";
+import { PostgresStore } from "@mastra/pg";
 import { createInngestHandler } from "./inngest";
 
 // Import agents
@@ -40,6 +41,9 @@ import {
  * - aoVeilleWorkflow: Complete pipeline from BOAMP fetch to analysis and storage
  */
 export const mastra = new Mastra({
+  storage: new PostgresStore({
+    connectionString: process.env.SUPABASE_DIRECT_URL!,
+  }),
   agents: {
     boampSemanticAnalyzer,
     aoFeedbackTuningAgent,

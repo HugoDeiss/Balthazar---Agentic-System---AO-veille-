@@ -13,6 +13,8 @@
 
 import { Agent } from '@mastra/core/agent';
 import { openai } from '@ai-sdk/openai';
+import { Memory } from '@mastra/memory';
+import { PostgresStore } from '@mastra/pg';
 import { aoCorrectionAgent } from './ao-correction-agent';
 import {
   getAODetails,
@@ -20,9 +22,35 @@ import {
   listActiveOverrides,
 } from '../tools/feedback-tools';
 
+const memory = new Memory({
+  storage: new PostgresStore({
+    connectionString: process.env.SUPABASE_DIRECT_URL!,
+  }),
+  options: {
+    lastMessages: 15,
+    threads: { generateTitle: false },
+    workingMemory: {
+      enabled: true,
+      scope: 'resource',
+      template: `# Profil Pablo — Préférences veille
+
+## Secteurs prioritaires confirmés
+<!-- mis à jour automatiquement selon les corrections appliquées -->
+
+## Règles récurrentes mentionnées
+<!-- patterns de feedback observés au fil des conversations -->
+
+## Derniers AOs discutés
+<!-- titres + décisions prises -->
+`,
+    },
+  },
+});
+
 export const aoFeedbackSupervisor = new Agent({
   name: 'ao-feedback-supervisor',
   model: openai('gpt-4o-mini'),
+  memory,
   agents: { aoCorrectionAgent },
   tools: { getAODetails, searchRAGChunks, listActiveOverrides },
   instructions: `Tu es le point d'entrée du système de feedback AO de Balthazar.

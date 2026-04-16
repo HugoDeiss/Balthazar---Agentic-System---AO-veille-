@@ -13,6 +13,7 @@
     "@mastra/core": "0.24.9",
     "@mastra/libsql": "0.16.4",
     "@mastra/loggers": "0.10.19",
+    "@mastra/memory": "^0.15.13",
     "@mastra/pg": "^0.17.10",
     "@supabase/supabase-js": "^2.89.0",
     "inngest": "^3.52.7",
