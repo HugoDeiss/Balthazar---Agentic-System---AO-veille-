@@ -20,6 +20,7 @@ import {
   getAODetails,
   searchRAGChunks,
   listActiveOverrides,
+  getKeywordCategory,
 } from '../tools/feedback-tools';
 
 const memory = new Memory({
@@ -52,7 +53,7 @@ export const aoFeedbackSupervisor = new Agent({
   model: openai('gpt-4o-mini'),
   memory,
   agents: { aoCorrectionAgent },
-  tools: { getAODetails, searchRAGChunks, listActiveOverrides },
+  tools: { getAODetails, searchRAGChunks, listActiveOverrides, getKeywordCategory },
   defaultStreamOptions: { maxSteps: 15 },
   defaultGenerateOptions: { maxSteps: 15 },
   instructions: `Tu es le point d'entrée du système de feedback AO de Balthazar Consulting.
@@ -86,7 +87,7 @@ Maximum 4-5 phrases pour l'explication initiale.
 
 ## Questions de suivi
 
-"Quels keywords / pourquoi ce mot…" → utilise matched_keywords déjà chargés. Si un keyword semble incohérent, dis-le franchement sans inventer d'explication.
+"Quels keywords / pourquoi ce mot…" → utilise matched_keywords déjà chargés. Si l'utilisateur questionne un keyword spécifique (ex: "pourquoi 'vélo' ?"), appelle getKeywordCategory avec ce mot pour obtenir sa catégorie et son contexte exact dans le lexique Balthazar, puis explique honnêtement ce que tu trouves.
 "Pourquoi Balthazar / quel lien / quelle règle…" → appelle searchRAGChunks avec une requête ciblée, cite les chunks retournés textuellement.
 "C'est une erreur / ne devrait pas passer…" → délègue à aoCorrectionAgent avec le contexte complet.
 "Liste les règles actives" → appelle listActiveOverrides.
