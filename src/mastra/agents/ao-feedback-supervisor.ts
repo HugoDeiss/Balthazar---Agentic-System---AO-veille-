@@ -1,27 +1,28 @@
 /**
  * AO Feedback Supervisor
  *
- * Lean router — single entry point for the feedback chat.
- * Loads context, explains the AO score, detects intent, and delegates
- * correction protocols to aoCorrectionAgent.
+ * Single entry point for the feedback chat.
+ * Loads context, explains the AO score, manages Q1/Q2/Q3 clarification (with Memory),
+ * then calls the typed executeCorrection tool to run the full correction pipeline.
  *
- * Architecture: 3-agent hierarchy
- * - aoFeedbackSupervisor (this): context loading, explanation, intent routing
- * - aoCorrectionAgent: 3-question clarification + diagnosis delegation + application
- * - aoFeedbackTuningAgent: structured diagnosis → typed FeedbackProposal
+ * Architecture: 2-agent + 1 typed tool
+ * - aoFeedbackSupervisor (this): context loading, explanation, Q1/Q2/Q3, confirmation
+ * - executeCorrection tool: searchSimilarKeywords + aoFeedbackTuningAgent + simulateImpact + proposeCorrection (typed, no NL parsing)
+ * - aoFeedbackTuningAgent: structured diagnosis → typed FeedbackProposal (called inside executeCorrection)
  */
 
 import { Agent } from '@mastra/core/agent';
 import { openai } from '@ai-sdk/openai';
 import { Memory } from '@mastra/memory';
 import { PostgresStore } from '@mastra/pg';
-import { aoCorrectionAgent } from './ao-correction-agent';
 import {
   getAODetails,
   searchRAGChunks,
   listActiveOverrides,
   getKeywordCategory,
+  executeCorrection,
   applyCorrection,
+  deactivateOverride,
 } from '../tools/feedback-tools';
 
 const memory = new Memory({
@@ -57,10 +58,9 @@ export const aoFeedbackSupervisor = new Agent({
   name: 'ao-feedback-supervisor',
   model: openai('gpt-4o-mini'),
   memory,
-  agents: { aoCorrectionAgent },
-  tools: { getAODetails, searchRAGChunks, listActiveOverrides, getKeywordCategory, applyCorrection },
-  defaultStreamOptions: { maxSteps: 15 },
-  defaultGenerateOptions: { maxSteps: 15 },
+  tools: { getAODetails, searchRAGChunks, listActiveOverrides, getKeywordCategory, executeCorrection, applyCorrection, deactivateOverride },
+  defaultStreamOptions: { maxSteps: 20 },
+  defaultGenerateOptions: { maxSteps: 20 },
   instructions: `Tu es le point d'entrée du système de feedback AO de Balthazar Consulting.
 
 ## Initialisation (message __init__ ou première ouverture)
@@ -123,24 +123,26 @@ Attends la réponse de l'utilisateur avant de continuer.
 
 **Q3 — Reformulation :** Reformule la règle envisagée en une phrase métier claire. Attends un oui/non explicite avant de passer à la suite.
 
-### Phase 2 — Exécution (après les 3 réponses, délègue à aoCorrectionAgent)
+### Phase 2 — Exécution (après les 3 réponses)
 
-Délègue à aoCorrectionAgent en lui transmettant dans un seul message :
-- Données AO : source_id, title, priority, matched_keywords, keyword_breakdown
-- Message original de l'utilisateur
-- Réponse Q1 (portée choisie)
-- Réponse Q2 (cas valide connu ou "aucun")
-- Réponse Q3 (reformulation confirmée)
+Appelle executeCorrection avec :
+- source_id : l'identifiant de l'AO
+- client_id : "balthazar"
+- ao_context : JSON.stringify des données AO connues (title, priority, matched_keywords, keyword_breakdown, rejet_raison)
+- user_reason : le message original de l'utilisateur signalant l'erreur
+- q1_scope : la réponse Q1 (portée choisie)
+- q2_valid_case : la réponse Q2 (cas valide connu ou "aucun")
+- q3_confirmed_rule : la réponse Q3 (reformulation confirmée)
 
-aoCorrectionAgent retourne : feedback_id + résumé de la proposition + résumé de la simulation.
+executeCorrection retourne directement : feedback_id (string), proposal_summary, simulation_summary, correction_type, correction_value. Ces valeurs sont typées — retiens-les telles quelles pour la phase 3.
 
 ### Phase 3 — Confirmation (tu gères toi-même)
 
-1. Présente à l'utilisateur le résumé de la simulation (AOs correctement exclus / AOs à risque) et la proposition.
+1. Présente à l'utilisateur le simulation_summary (AOs correctement exclus / AOs à risque) et le proposal_summary.
 2. Indique "Actif dès demain 6h si tu confirmes."
 3. Attends une confirmation explicite ("oui", "confirme", "ok", "vas-y").
-4. Appelle applyCorrection avec le feedback_id retourné par aoCorrectionAgent et approved=true.
-5. Mets à jour le working memory : dans "Corrections appliquées", ajoute source_id | correction_type | valeur | date du jour.
+4. Appelle applyCorrection avec le feedback_id exact retourné par executeCorrection et approved=true.
+5. Mets à jour le working memory : dans "Corrections appliquées", ajoute source_id | correction_type | correction_value | date du jour.
 6. Si l'utilisateur annule → appelle applyCorrection(feedback_id, approved=false).
 
 ### Règles absolues

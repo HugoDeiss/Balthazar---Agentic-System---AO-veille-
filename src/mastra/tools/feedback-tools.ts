@@ -23,6 +23,7 @@ import { createClient } from '@supabase/supabase-js';
 import { insertAndIndexChunk } from '../../utils/rag-indexer';
 import { embedQuery, getVectorStore } from './balthazar-rag-tools';
 import { balthazarLexicon, normalizeText } from '../../utils/balthazar-keywords';
+import { aoFeedbackTuningAgent, feedbackProposalSchema } from '../agents/ao-feedback-tuning-agent';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -627,6 +628,126 @@ ou quand tu suspectes qu'une règle précédente cause des effets de bord.`,
       overrides,
       total: overrides.length,
       summary: `${overrides.length} règle(s) active(s) :\n${summary}`,
+    };
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tool 10 — executeCorrection
+// Typed orchestrator: runs the full correction pipeline in one deterministic
+// call (searchSimilarKeywords → tuningAgent → simulateImpact → proposeCorrection)
+// and returns a typed result to the supervisor. Replaces sub-agent delegation.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const executeCorrection = createTool({
+  id: 'executeCorrection',
+  description: `Exécute le pipeline complet de correction : diagnostic (tuning agent), simulation d'impact, et enregistrement de la proposition.
+Appelle cet outil après avoir collecté les réponses Q1/Q2/Q3 de l'utilisateur.
+Retourne un résultat typé avec feedback_id, résumé de la proposition et de la simulation.
+Ne demande PAS de confirmation à l'utilisateur — c'est le superviseur qui gère la phase de confirmation via applyCorrection.`,
+  inputSchema: z.object({
+    source_id: z.string().describe("source_id de l'AO concerné"),
+    client_id: z.string().default('balthazar'),
+    ao_context: z.string().describe('JSON stringifié des données AO (title, priority, matched_keywords, keyword_breakdown, rejet_raison, etc.)'),
+    user_reason: z.string().describe("Message original de l'utilisateur signalant l'erreur"),
+    q1_scope: z.string().describe('Réponse Q1 — portée choisie (quelle catégorie exclure)'),
+    q2_valid_case: z.string().describe('Réponse Q2 — AO similaire à préserver, ou "aucun"'),
+    q3_confirmed_rule: z.string().describe('Réponse Q3 — reformulation confirmée de la règle'),
+  }),
+  outputSchema: z.object({
+    feedback_id: z.string(),
+    proposal_summary: z.string(),
+    simulation_summary: z.string(),
+    correction_type: z.enum(['keyword_red_flag', 'rag_chunk']),
+    correction_value: z.string(),
+  }),
+  execute: async ({ context }) => {
+    // Step 1 — Check for duplicate rules
+    const { data: existingOverrides } = await supabase
+      .from('keyword_overrides')
+      .select('value, type, reason')
+      .eq('client_id', context.client_id)
+      .eq('active', true)
+      .ilike('value', `%${context.q3_confirmed_rule.substring(0, 20)}%`);
+
+    const similarRulesContext = existingOverrides?.length
+      ? `Règles similaires déjà actives : ${existingOverrides.map(o => `"${o.value}" (${o.type})`).join(', ')}`
+      : 'Aucune règle similaire détectée.';
+
+    // Step 2 — Tuning agent: structured diagnosis
+    const diagnosisPrompt = `Contexte AO :
+${context.ao_context}
+
+Message utilisateur : ${context.user_reason}
+
+Réponses aux questions de clarification :
+Q1 (portée) : ${context.q1_scope}
+Q2 (cas valide connu) : ${context.q2_valid_case}
+Q3 (reformulation confirmée) : ${context.q3_confirmed_rule}
+
+${similarRulesContext}
+
+Propose une correction unique et ciblée.`;
+
+    const diagnosisResult = await aoFeedbackTuningAgent.generate(diagnosisPrompt, {
+      output: feedbackProposalSchema,
+    });
+
+    const proposal = diagnosisResult.object;
+
+    // Step 3 — Determine the term to simulate
+    const term =
+      proposal.technical_payload.red_flag_to_add ??
+      proposal.technical_payload.chunk_title ??
+      context.q3_confirmed_rule;
+
+    // Step 4 — Simulate impact
+    const since = new Date();
+    since.setDate(since.getDate() - 30);
+
+    const { data: affectedAOs } = await supabase
+      .from('appels_offres')
+      .select('source_id, title, priority')
+      .gte('analyzed_at', since.toISOString())
+      .or(`title.ilike.%${term}%,description.ilike.%${term}%`);
+
+    const affected = affectedAOs ?? [];
+    const correctlyExcluded = affected.filter(ao => ao.priority === 'LOW' || ao.priority === null);
+    const potentiallyWrong = affected.filter(ao => ao.priority === 'HIGH' || ao.priority === 'MEDIUM');
+
+    const simulationLines: string[] = [`${affected.length} AO(s) affecté(s) sur les 30 derniers jours.`];
+    if (correctlyExcluded.length > 0) simulationLines.push(`✅ ${correctlyExcluded.length} correctement exclus (déjà LOW).`);
+    if (potentiallyWrong.length > 0) simulationLines.push(`⚠️ ${potentiallyWrong.length} à vérifier (HIGH/MEDIUM) : ${potentiallyWrong.map(a => `"${a.title}"`).join(', ')}.`);
+    const simulationSummary = simulationLines.join(' ');
+
+    // Step 5 — Record the proposal (pending confirmation)
+    const { data: feedbackRow } = await supabase
+      .from('ao_feedback')
+      .insert({
+        source_id: context.source_id,
+        client_id: context.client_id,
+        feedback: 'not_relevant',
+        reason: context.user_reason,
+        correction_type: proposal.correction_type,
+        correction_value: term,
+        chunk_content: proposal.technical_payload.chunk_content ?? null,
+        agent_diagnosis: proposal.diagnosis_fr,
+        agent_proposal: proposal.proposal_fr,
+        status: 'agent_proposed',
+        source: 'chat',
+      })
+      .select()
+      .single();
+
+    const feedbackId = feedbackRow?.id ?? '';
+    const proposalSummary = `${proposal.proposal_fr} — ${proposal.impact_fr}`;
+
+    return {
+      feedback_id: feedbackId,
+      proposal_summary: proposalSummary,
+      simulation_summary: simulationSummary,
+      correction_type: proposal.correction_type,
+      correction_value: term,
     };
   },
 });
