@@ -514,9 +514,18 @@ Utilise cet outil quand l'utilisateur questionne un keyword spécifique détect�
     const normalized = normalizeText(context.keyword);
     const matches: Array<{ category_key: string; category_label: string; category_description: string; weight: number; is_red_flag: boolean }> = [];
 
+    // Word-boundary match: queried word must appear as a whole word in the lexicon phrase,
+    // not as a substring of another word (e.g. "velo" must NOT match "developpement").
+    const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const wordBoundaryRe = new RegExp(`\\b${escaped}\\b`);
+    const kwMatches = (kw: string): boolean => {
+      const kwNorm = normalizeText(kw);
+      return kwNorm === normalized || wordBoundaryRe.test(kwNorm) || normalized.includes(kwNorm);
+    };
+
     // Search in secteurs
     for (const [key, config] of Object.entries(balthazarLexicon.secteurs)) {
-      const found = config.keywords.some(kw => normalizeText(kw) === normalized || normalizeText(kw).includes(normalized) || normalized.includes(normalizeText(kw)));
+      const found = config.keywords.some(kwMatches);
       const patternMatch = config.patterns.some(p => p.test(context.keyword));
       if (found || patternMatch) {
         const meta = CATEGORY_LABELS[key] ?? { label: key, description: '' };
@@ -526,7 +535,7 @@ Utilise cet outil quand l'utilisateur questionne un keyword spécifique détect�
 
     // Search in expertises
     for (const [key, config] of Object.entries(balthazarLexicon.expertises)) {
-      const found = config.keywords.some(kw => normalizeText(kw) === normalized || normalizeText(kw).includes(normalized) || normalized.includes(normalizeText(kw)));
+      const found = config.keywords.some(kwMatches);
       const patternMatch = config.patterns.some(p => p.test(context.keyword));
       if (found || patternMatch) {
         const meta = CATEGORY_LABELS[key] ?? { label: key, description: '' };
@@ -535,7 +544,7 @@ Utilise cet outil quand l'utilisateur questionne un keyword spécifique détect�
     }
 
     // Search in posture
-    const postureFound = balthazarLexicon.posture.keywords.some(kw => normalizeText(kw) === normalized || normalizeText(kw).includes(normalized) || normalized.includes(normalizeText(kw)));
+    const postureFound = balthazarLexicon.posture.keywords.some(kwMatches);
     const posturePattern = balthazarLexicon.posture.patterns.some(p => p.test(context.keyword));
     if (postureFound || posturePattern) {
       const meta = CATEGORY_LABELS['posture'] ?? { label: 'posture', description: '' };
@@ -543,16 +552,26 @@ Utilise cet outil quand l'utilisateur questionne un keyword spécifique détect�
     }
 
     // Search in red_flags
-    const rfFound = balthazarLexicon.red_flags.keywords.some(kw => normalizeText(kw) === normalized || normalizeText(kw).includes(normalized) || normalized.includes(normalizeText(kw)));
+    const rfFound = balthazarLexicon.red_flags.keywords.some(kwMatches);
     const rfPattern = balthazarLexicon.red_flags.patterns.some(p => p.test(context.keyword));
     if (rfFound || rfPattern) {
       const meta = CATEGORY_LABELS['red_flags'] ?? { label: 'red_flags', description: '' };
       matches.push({ category_key: 'red_flags', category_label: meta.label, category_description: meta.description, weight: 0, is_red_flag: true });
     }
 
-    const summary = matches.length === 0
-      ? `"${context.keyword}" n'est pas dans le lexique Balthazar. Il a peut-être matché via un pattern regex ou c'est un faux positif à investiguer.`
-      : matches.map(m => `"${context.keyword}" → ${m.category_label} (weight: ${m.weight}). ${m.category_description}`).join('\n');
+    const positiveMatches = matches.filter(m => !m.is_red_flag);
+    const redFlagMatch = matches.find(m => m.is_red_flag);
+    let summary: string;
+    if (matches.length === 0) {
+      summary = `"${context.keyword}" n'est pas dans le lexique Balthazar. Il a peut-être matché via un pattern regex ou c'est un faux positif à investiguer.`;
+    } else if (redFlagMatch && positiveMatches.length === 0) {
+      summary = `"${context.keyword}" est un red flag : ${redFlagMatch.category_description} Il signale que l'AO est probablement hors périmètre Balthazar.`;
+    } else if (redFlagMatch && positiveMatches.length > 0) {
+      const posLine = positiveMatches.map(m => `${m.category_label} (weight: ${m.weight})`).join(', ');
+      summary = `"${context.keyword}" est classé dans ${posLine}. Cependant, il est aussi signalé comme red flag potentiel dans certains contextes : ${redFlagMatch.category_description}`;
+    } else {
+      summary = positiveMatches.map(m => `"${context.keyword}" → ${m.category_label} (weight: ${m.weight}). ${m.category_description}`).join('\n');
+    }
 
     return { found: matches.length > 0, keyword: context.keyword, matches, summary };
   },
