@@ -21,6 +21,11 @@ import {
   searchRAGChunks,
   listActiveOverrides,
   getKeywordCategory,
+  simulateImpact,
+  searchSimilarKeywords,
+  proposeCorrection,
+  applyCorrection,
+  deactivateOverride,
 } from '../tools/feedback-tools';
 
 const memory = new Memory({
@@ -57,7 +62,10 @@ export const aoFeedbackSupervisor = new Agent({
   model: openai('gpt-4o-mini'),
   memory,
   agents: { aoCorrectionAgent },
-  tools: { getAODetails, searchRAGChunks, listActiveOverrides, getKeywordCategory },
+  tools: {
+    getAODetails, searchRAGChunks, listActiveOverrides, getKeywordCategory,
+    simulateImpact, searchSimilarKeywords, proposeCorrection, applyCorrection, deactivateOverride,
+  },
   defaultStreamOptions: { maxSteps: 15 },
   defaultGenerateOptions: { maxSteps: 15 },
   instructions: `Tu es le point d'entrée du système de feedback AO de Balthazar Consulting.
@@ -100,15 +108,46 @@ Maximum 4-5 phrases pour l'explication initiale.
 
 "Compare avec l'AO X / pourquoi l'AO X a été scoré différemment…" → vérifie le working memory pour retrouver le source_id de l'AO X. Appelle getAODetails sur cet AO, puis présente la comparaison : final_score, priority, matched_keywords différents, keyword_breakdown.
 
-"C'est une erreur / ne devrait pas passer…" → délègue à aoCorrectionAgent avec le contexte complet (source_id, matched_keywords, keyword_breakdown, rejet_raison si présent).
+"C'est une erreur / ne devrait pas passer / pas pertinent…" → lance le protocole de correction ci-dessous.
 
 "Liste les règles actives" → appelle listActiveOverrides.
 
+"Désactiver la règle X" → appelle deactivateOverride.
+
 Salutation → réponds normalement.
 
-## Après chaque correction appliquée
+## Protocole de correction (tu gères tout toi-même, pas de délégation)
 
-Mets à jour le working memory : dans "Corrections appliquées", ajoute source_id | correction_type | valeur | date du jour. Dans "Derniers AOs discutés", mets à jour la décision prise pour cet AO.
+### Phase 1 — Clarification (une question par tour, attends la réponse avant de poser la suivante)
 
-Ne fais jamais de diagnostic de correction toi-même.`,
+**Q1 — Portée :** Propose 2-3 options concrètes basées sur l'AO réel, pas une question ouverte.
+Format exact : "On exclut : A) [option 1] B) [option 2] C) autre ?"
+Attends la réponse de l'utilisateur avant de continuer.
+
+**Q2 — Cas valide connu :** "Y a-t-il un AO similaire qui devrait quand même passer ? Je veux éviter de l'exclure."
+Si l'utilisateur cite un AO → appelle simulateImpact immédiatement avec le terme envisagé.
+Si l'utilisateur ne se souvient pas → passe à Q3.
+Attends la réponse de l'utilisateur avant de continuer.
+
+**Q3 — Confirmation :** Reformule la règle envisagée en deux versions : une en termes métier, une en termes techniques. Attends un oui/non explicite.
+
+### Phase 2 — Exécution (après avoir reçu les 3 réponses)
+
+1. Appelle searchSimilarKeywords pour vérifier qu'aucune règle similaire n'existe déjà.
+2. Délègue à aoCorrectionAgent en lui fournissant : données AO complètes + message utilisateur + réponses Q1/Q2/Q3. L'agent retourne un FeedbackProposal structuré.
+3. Appelle simulateImpact avec le terme proposé par aoCorrectionAgent.
+4. Présente le résultat à l'utilisateur : AOs correctement exclus / AOs à risque.
+5. Si des AOs HIGH ou MEDIUM sont à risque : demande confirmation spécifique avant de continuer.
+6. Appelle proposeCorrection avec les champs du FeedbackProposal.
+7. Présente la double reformulation (métier + technique) et indique "Actif dès demain 6h".
+8. Attends une confirmation explicite ("oui", "confirme", "ok", "vas-y").
+9. Appelle applyCorrection(approved=true).
+10. Mets à jour le working memory : dans "Corrections appliquées", ajoute source_id | correction_type | valeur | date du jour. Dans "Derniers AOs discutés", mets à jour la décision prise.
+
+### Règles absolues du protocole
+
+- Ne jamais passer à la question suivante sans avoir reçu la réponse à la question courante.
+- Ne jamais appeler applyCorrection sans confirmation explicite.
+- Une seule correction à la fois.
+- Si l'utilisateur annule → appelle applyCorrection avec approved=false.`,
 });
