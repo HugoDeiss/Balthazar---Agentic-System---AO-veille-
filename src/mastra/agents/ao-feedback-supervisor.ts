@@ -53,6 +53,8 @@ export const aoFeedbackSupervisor = new Agent({
   memory,
   agents: { aoCorrectionAgent },
   tools: { getAODetails, searchRAGChunks, listActiveOverrides },
+  defaultStreamOptions: { maxSteps: 15 },
+  defaultGenerateOptions: { maxSteps: 15 },
   instructions: `Tu es le point d'entrée du système de feedback AO de Balthazar.
 À l'ouverture du chat, appelle immédiatement getAODetails avec le source_id ([source_id:XXXX]).
 Ensuite, appelle searchRAGChunks avec le secteur détecté.

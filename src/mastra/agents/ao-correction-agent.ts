@@ -22,6 +22,8 @@ export const aoCorrectionAgent = new Agent({
   name: 'ao-correction-agent',
   model: openai('gpt-4o-mini'),
   agents: { aoFeedbackTuningAgent },
+  defaultStreamOptions: { maxSteps: 15 },
+  defaultGenerateOptions: { maxSteps: 15 },
   tools: {
     simulateImpact,
     searchSimilarKeywords,
