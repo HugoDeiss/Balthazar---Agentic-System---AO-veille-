@@ -47,9 +47,13 @@ export const getAODetails = createTool({
     priority: z.string().nullable(),
     keyword_score: z.number().nullable(),
     semantic_score: z.number().nullable(),
+    final_score: z.number().nullable(),
+    confidence_decision: z.string().nullable(),
     matched_keywords: z.array(z.string()).nullable(),
+    matched_keywords_detail: z.any().nullable(),
     keyword_breakdown: z.any().nullable(),
     semantic_reason: z.string().nullable(),
+    rejet_raison: z.string().nullable(),
     human_readable_reason: z.string().nullable(),
     rag_sources_detail: z.any().nullable(),
     decision_gate: z.string().nullable(),
@@ -61,8 +65,9 @@ export const getAODetails = createTool({
       .from('appels_offres')
       .select(`
         title, description, acheteur, priority,
-        keyword_score, semantic_score, matched_keywords,
-        keyword_breakdown, semantic_reason, human_readable_reason,
+        keyword_score, semantic_score, final_score, confidence_decision,
+        matched_keywords, matched_keywords_detail,
+        keyword_breakdown, semantic_reason, rejet_raison, human_readable_reason,
         rag_sources_detail, decision_gate, llm_skipped, llm_skip_reason
       `)
       .eq('source_id', context.source_id)

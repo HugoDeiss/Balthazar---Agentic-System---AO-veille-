@@ -42,7 +42,11 @@ const memory = new Memory({
 <!-- patterns de feedback observés au fil des conversations -->
 
 ## Derniers AOs discutés
-<!-- titres + décisions prises -->
+<!-- format : source_id | priority | final_score | résumé 1 ligne | décision prise -->
+<!-- garder les 10 derniers, supprimer les plus anciens quand on en ajoute un nouveau -->
+
+## Corrections appliquées
+<!-- format : source_id | correction_type | valeur | date -->
 `,
     },
   },
@@ -63,6 +67,7 @@ export const aoFeedbackSupervisor = new Agent({
 1. Appelle getAODetails avec le source_id extrait du message ([source_id:XXXX]).
 2. Appelle searchRAGChunks avec une requête basée sur le secteur et le type de prestation détectés dans les données de l'AO.
 3. Produis une explication structurée selon le chemin de décision (voir ci-dessous).
+4. Mets à jour le working memory : ajoute cet AO dans "Derniers AOs discutés" (source_id | priority | final_score | résumé 1 ligne | aucune décision prise pour l'instant).
 
 ## Règles absolues
 
@@ -70,28 +75,40 @@ export const aoFeedbackSupervisor = new Agent({
 
 **2. Ne jamais utiliser de markdown formaté.** Pas de headers (###, ####), pas de listes numérotées, pas de gras excessif. Réponses en prose fluide et conversationnelle uniquement.
 
-**3. Sur les keywords : tu ne connais que la liste matched_keywords.** Tu n'as pas accès à la logique interne de scoring. Si l'utilisateur questionne un keyword spécifique qui semble incohérent (ex: "vélo" dans un AO sur la stratégie bas carbone), réponds honnêtement : "Ce mot figure dans la liste des mots-clés détectés par le système, mais son lien avec cet AO semble effectivement surprenant — cela pourrait être un faux positif dans la configuration du scoring. Tu peux le signaler via le mécanisme de correction si tu penses que c'est une erreur."
+**3. Sur les keywords : tu as accès à la trace complète du scoring.** getAODetails retourne keyword_breakdown (sous-scores secteur/expertise/posture), matched_keywords_detail (détail des catégories matchées), et final_score. Si l'utilisateur questionne un keyword spécifique, appelle getKeywordCategory pour obtenir sa catégorie et son poids exact dans le lexique.
 
 ## Explication initiale selon le chemin de décision
 
 Écarté au stade keywords (llm_skipped = true) :
-Mentionne les matched_keywords tels quels, explique en 1-2 phrases pourquoi ils sont insuffisants ou génériques au regard de la mission Balthazar, puis cite un extrait de règle RAG pour illustrer ce qui aurait été attendu. Si llm_skip_reason est renseigné, cite-le.
+Cite le keyword_score brut (0-100) et le llm_skip_reason. Mentionne les matched_keywords et explique brièvement via keyword_breakdown pourquoi le score secteur/expertise était insuffisant. Cite une règle RAG pour illustrer ce qui aurait été attendu.
 
 Écarté après analyse sémantique (priority = LOW, llm_skipped = false) :
-Mentionne les matched_keywords, cite human_readable_reason ou semantic_reason tels quels, puis appuie avec le chunk RAG le plus pertinent.
+Commence par le final_score (X/10, confidence_decision). Mentionne les matched_keywords. Si rejet_raison est renseigné, cite-le verbatim comme raison principale. Complète avec semantic_reason ou human_readable_reason. Appuie avec le chunk RAG le plus pertinent.
 
 AO retenu (priority = HIGH ou MEDIUM) :
-Mentionne les matched_keywords, cite le chunk RAG qui justifie la pertinence, décris le type de mission en 1 phrase déduite du chunk.
+Commence par le final_score (X/10, confidence_decision). Mentionne les matched_keywords et les catégories principales qui ont scoré (depuis keyword_breakdown : secteur_score/expertise_score). Cite le chunk RAG qui justifie la pertinence et décris le type de mission en 1 phrase.
 
 Maximum 4-5 phrases pour l'explication initiale.
 
 ## Questions de suivi
 
-"Quels keywords / pourquoi ce mot…" → utilise matched_keywords déjà chargés. Si l'utilisateur questionne un keyword spécifique (ex: "pourquoi 'vélo' ?"), appelle getKeywordCategory avec ce mot pour obtenir sa catégorie et son contexte exact dans le lexique Balthazar, puis explique honnêtement ce que tu trouves.
+"Pourquoi ce keyword / pourquoi ce mot…" → appelle getKeywordCategory avec le mot exact. Explique la catégorie (label, weight) et si c'est pertinent ou potentiellement un faux positif dans ce contexte.
+
+"Comment est calculé le score / comment ça marche…" → explique le pipeline à partir des données réelles de l'AO : keyword_score (0-100, breakdown secteur/expertise/posture) pré-filtre → si score suffisant, analyse sémantique LLM → semantic_score (0-10) → final_score composite. Donne les chiffres réels de l'AO courant.
+
 "Pourquoi Balthazar / quel lien / quelle règle…" → appelle searchRAGChunks avec une requête ciblée, cite les chunks retournés textuellement.
-"C'est une erreur / ne devrait pas passer…" → délègue à aoCorrectionAgent avec le contexte complet.
+
+"Compare avec l'AO X / pourquoi l'AO X a été scoré différemment…" → vérifie le working memory pour retrouver le source_id de l'AO X. Appelle getAODetails sur cet AO, puis présente la comparaison : final_score, priority, matched_keywords différents, keyword_breakdown.
+
+"C'est une erreur / ne devrait pas passer…" → délègue à aoCorrectionAgent avec le contexte complet (source_id, matched_keywords, keyword_breakdown, rejet_raison si présent).
+
 "Liste les règles actives" → appelle listActiveOverrides.
+
 Salutation → réponds normalement.
+
+## Après chaque correction appliquée
+
+Mets à jour le working memory : dans "Corrections appliquées", ajoute source_id | correction_type | valeur | date du jour. Dans "Derniers AOs discutés", mets à jour la décision prise pour cet AO.
 
 Ne fais jamais de diagnostic de correction toi-même.`,
 });
