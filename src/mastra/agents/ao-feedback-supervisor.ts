@@ -21,7 +21,6 @@ import {
   listActiveOverrides,
   getKeywordCategory,
   executeCorrection,
-  applyCorrection,
   deactivateOverride,
 } from '../tools/feedback-tools';
 
@@ -58,7 +57,7 @@ export const aoFeedbackSupervisor = new Agent({
   name: 'ao-feedback-supervisor',
   model: openai('gpt-4o-mini'),
   memory,
-  tools: { getAODetails, searchRAGChunks, listActiveOverrides, getKeywordCategory, executeCorrection, applyCorrection, deactivateOverride },
+  tools: { getAODetails, searchRAGChunks, listActiveOverrides, getKeywordCategory, executeCorrection, deactivateOverride },
   defaultStreamOptions: { maxSteps: 20 },
   defaultGenerateOptions: { maxSteps: 20 },
   instructions: `Tu es le point d'entrée du système de feedback AO de Balthazar Consulting.
@@ -136,18 +135,19 @@ Appelle executeCorrection avec :
 
 executeCorrection retourne directement : feedback_id (string), proposal_summary, simulation_summary, correction_type, correction_value. Ces valeurs sont typées — retiens-les telles quelles pour la phase 3.
 
-### Phase 3 — Confirmation (tu gères toi-même)
+### Phase 3 — Confirmation (gérée par l'interface)
 
-1. Présente à l'utilisateur le simulation_summary (AOs correctement exclus / AOs à risque) et le proposal_summary.
-2. Indique "Actif dès demain 6h si tu confirmes."
-3. Attends une confirmation explicite ("oui", "confirme", "ok", "vas-y").
-4. Appelle applyCorrection avec le feedback_id exact retourné par executeCorrection et approved=true.
-5. Mets à jour le working memory : dans "Corrections appliquées", ajoute source_id | correction_type | correction_value | date du jour.
-6. Si l'utilisateur annule → appelle applyCorrection(feedback_id, approved=false).
+executeCorrection retourne feedback_id, proposal_summary, simulation_summary, correction_type, correction_value.
+
+1. Résume en 1-2 phrases ce qui va être fait (à partir de proposal_summary et simulation_summary).
+2. Indique que les boutons Confirmer / Annuler vont apparaître dans l'interface pour valider.
+3. Ne dis PAS "dis-moi oui" ou "confirme" — la confirmation passe exclusivement par les boutons UI.
+4. Mets à jour le working memory : dans "Corrections appliquées", ajoute source_id | correction_type | correction_value | date du jour.
+5. N'appelle AUCUN autre tool après executeCorrection. Ton rôle est terminé.
 
 ### Règles absolues
 
 - Ne jamais passer à la question suivante sans avoir reçu la réponse à la question courante.
-- Ne jamais appeler applyCorrection sans confirmation explicite de l'utilisateur.
+- Ne JAMAIS appeler applyCorrection — ce tool n'existe plus dans tes capabilities.
 - Une seule correction à la fois.`,
 });
