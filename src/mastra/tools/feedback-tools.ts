@@ -201,6 +201,58 @@ export const searchRAGChunks = createTool({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Tool 3b — proposeChoices
+// Generates structured Q1 options (portée de la correction) for the supervisor.
+// The UI renders these as interactive ChoiceCard buttons.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const proposeChoices = createTool({
+  id: 'proposeChoices',
+  description: `Génère les options structurées pour Q1 (portée de la correction).
+Appelle ce tool pour formuler Q1 de façon structurée — le résultat s'affichera sous forme de carte interactive dans l'interface.
+Pour un faux positif (direction=exclude) : options d'exclusion basées sur les keywords de l'AO.
+Pour un faux négatif (direction=include) : options de boost basées sur les keywords de l'AO.`,
+  inputSchema: z.object({
+    source_id: z.string().describe("source_id de l'AO concerné"),
+    direction: z.enum(['exclude', 'include']).default('exclude').describe("'exclude' pour un faux positif, 'include' pour un faux négatif"),
+  }),
+  outputSchema: z.object({
+    question: z.string(),
+    choices: z.array(z.object({
+      letter: z.string(),
+      label: z.string(),
+      value: z.string(),
+    })),
+    direction: z.enum(['exclude', 'include']),
+  }),
+  execute: async ({ context }) => {
+    const { data } = await supabase
+      .from('appels_offres')
+      .select('title, matched_keywords, keyword_breakdown')
+      .eq('source_id', context.source_id)
+      .single();
+
+    const keywords: string[] = ((data?.matched_keywords as string[]) ?? []).slice(0, 2);
+    const choices: Array<{ letter: string; label: string; value: string }> = [];
+    const letters = ['A', 'B', 'C'];
+
+    if (context.direction === 'exclude') {
+      keywords.forEach((kw, i) => {
+        choices.push({ letter: letters[i], label: `Les AOs liés à "${kw}"`, value: kw });
+      });
+      choices.push({ letter: letters[choices.length], label: 'Autre (je précise)', value: 'autre' });
+      return { question: 'On exclut :', choices, direction: 'exclude' as const };
+    } else {
+      keywords.forEach((kw, i) => {
+        choices.push({ letter: letters[i], label: `Booster les AOs liés à "${kw}"`, value: kw });
+      });
+      choices.push({ letter: letters[choices.length], label: 'Autre (je précise)', value: 'autre' });
+      return { question: 'On booste :', choices, direction: 'include' as const };
+    }
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tool 4 — proposeCorrection
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -264,31 +316,33 @@ export const proposeCorrection = createTool({
 // Tool 5 — simulateImpact
 // ─────────────────────────────────────────────────────────────────────────────
 
+const simulateImpactAOSchema = z.object({
+  source_id: z.string(),
+  title: z.string(),
+  priority: z.string().nullable(),
+  url_ao: z.string().nullable(),
+  final_score: z.number().nullable(),
+  reason: z.string(),
+});
+
 export const simulateImpact = createTool({
   id: 'simulateImpact',
-  description: `Simule l'impact d'un nouveau red flag sur les AOs récents.
-Appelle cet outil APRÈS les questions de clarification et AVANT proposeCorrection.
-Retourne deux catégories : AOs correctement exclus (LOW) et AOs potentiellement exclus à tort (HIGH/MEDIUM).
-Présente le résultat à l'utilisateur avant de continuer.`,
+  description: `Simule l'impact d'un terme sur les AOs récents. Appelle cet outil pour Q2 : montrer à l'utilisateur les AOs similaires affectés avant de confirmer la correction.
+Pour direction=exclude : montre les AOs HIGH/MEDIUM qui seraient exclus à tort (à vérifier) et les LOW correctement exclus.
+Pour direction=include : montre les AOs LOW qui seraient promus.
+Le résultat s'affichera sous forme de carte interactive dans l'interface.`,
   inputSchema: z.object({
-    term: z.string().describe("Terme à tester comme red flag (ex: 'stratégie achats')"),
+    term: z.string().describe("Terme à tester (red flag pour exclude, keyword à booster pour include)"),
     days_back: z.number().default(30).describe('Fenêtre temporelle en jours (défaut: 30)'),
+    direction: z.enum(['exclude', 'include']).default('exclude').describe("'exclude' pour simuler un red flag, 'include' pour simuler un boost"),
   }),
   outputSchema: z.object({
     total_affected: z.number(),
-    correctly_excluded: z.array(z.object({
-      source_id: z.string(),
-      title: z.string(),
-      priority: z.string().nullable(),
-      reason: z.string(),
-    })),
-    potentially_wrong: z.array(z.object({
-      source_id: z.string(),
-      title: z.string(),
-      priority: z.string().nullable(),
-      reason: z.string(),
-    })),
+    correctly_excluded: z.array(simulateImpactAOSchema),
+    potentially_wrong: z.array(simulateImpactAOSchema),
+    would_promote: z.array(simulateImpactAOSchema),
     summary: z.string(),
+    direction: z.enum(['exclude', 'include']),
   }),
   execute: async ({ context }) => {
     const since = new Date();
@@ -296,44 +350,84 @@ Présente le résultat à l'utilisateur avant de continuer.`,
 
     const { data } = await supabase
       .from('appels_offres')
-      .select('source_id, title, priority')
+      .select('source_id, title, priority, url_ao, final_score')
       .gte('analyzed_at', since.toISOString())
       .or(`title.ilike.%${context.term}%,description.ilike.%${context.term}%`);
 
     const affected = data ?? [];
 
-    const correctly_excluded = affected
-      .filter(ao => ao.priority === 'LOW' || ao.priority === null)
-      .map(ao => ({
-        source_id: ao.source_id,
-        title: ao.title,
-        priority: ao.priority,
-        reason: "AO déjà classé LOW — l'exclusion ne change rien de visible",
-      }));
+    if (context.direction === 'exclude') {
+      const correctly_excluded = affected
+        .filter(ao => ao.priority === 'LOW' || ao.priority === null)
+        .map(ao => ({
+          source_id: ao.source_id,
+          title: ao.title,
+          priority: ao.priority,
+          url_ao: ao.url_ao ?? null,
+          final_score: ao.final_score ?? null,
+          reason: "AO déjà classé LOW — l'exclusion ne change rien de visible",
+        }));
 
-    const potentially_wrong = affected
-      .filter(ao => ao.priority === 'HIGH' || ao.priority === 'MEDIUM')
-      .map(ao => ({
-        source_id: ao.source_id,
-        title: ao.title,
-        priority: ao.priority,
-        reason: `AO classé ${ao.priority} — à vérifier avant de confirmer l'exclusion`,
-      }));
+      const potentially_wrong = affected
+        .filter(ao => ao.priority === 'HIGH' || ao.priority === 'MEDIUM')
+        .map(ao => ({
+          source_id: ao.source_id,
+          title: ao.title,
+          priority: ao.priority,
+          url_ao: ao.url_ao ?? null,
+          final_score: ao.final_score ?? null,
+          reason: `AO classé ${ao.priority} — à vérifier avant de confirmer l'exclusion`,
+        }));
 
-    const summaryLines: string[] = [`${affected.length} AO(s) affecté(s) sur les ${context.days_back} derniers jours.`];
-    if (correctly_excluded.length > 0) {
-      summaryLines.push(`✅ ${correctly_excluded.length} correctement exclus (déjà LOW).`);
+      const summaryLines: string[] = [`${affected.length} AO(s) affecté(s) sur les ${context.days_back} derniers jours.`];
+      if (correctly_excluded.length > 0) summaryLines.push(`✅ ${correctly_excluded.length} correctement exclus (déjà LOW).`);
+      if (potentially_wrong.length > 0) summaryLines.push(`⚠️ ${potentially_wrong.length} à vérifier (HIGH/MEDIUM) : ${potentially_wrong.map(a => `"${a.title}"`).join(', ')}.`);
+
+      return {
+        total_affected: affected.length,
+        correctly_excluded,
+        potentially_wrong,
+        would_promote: [],
+        summary: summaryLines.join(' '),
+        direction: 'exclude' as const,
+      };
+    } else {
+      const would_promote = affected
+        .filter(ao => ao.priority === 'LOW' || ao.priority === null)
+        .map(ao => ({
+          source_id: ao.source_id,
+          title: ao.title,
+          priority: ao.priority,
+          url_ao: ao.url_ao ?? null,
+          final_score: ao.final_score ?? null,
+          reason: 'AO LOW qui serait promu avec ce boost',
+        }));
+
+      const already_passing = affected
+        .filter(ao => ao.priority === 'HIGH' || ao.priority === 'MEDIUM')
+        .map(ao => ({
+          source_id: ao.source_id,
+          title: ao.title,
+          priority: ao.priority,
+          url_ao: ao.url_ao ?? null,
+          final_score: ao.final_score ?? null,
+          reason: `AO déjà ${ao.priority} — pas d'impact`,
+        }));
+
+      const summaryLines: string[] = [`${affected.length} AO(s) concerné(s) sur les ${context.days_back} derniers jours.`];
+      if (would_promote.length > 0) summaryLines.push(`🔼 ${would_promote.length} AO(s) LOW seraient promus.`);
+      if (already_passing.length > 0) summaryLines.push(`✅ ${already_passing.length} déjà HIGH/MEDIUM — pas d'impact.`);
+      if (affected.length === 0) summaryLines.push('Aucun AO récent contient ce terme.');
+
+      return {
+        total_affected: affected.length,
+        correctly_excluded: already_passing,
+        potentially_wrong: [],
+        would_promote,
+        summary: summaryLines.join(' '),
+        direction: 'include' as const,
+      };
     }
-    if (potentially_wrong.length > 0) {
-      summaryLines.push(`⚠️ ${potentially_wrong.length} à vérifier (HIGH/MEDIUM) : ${potentially_wrong.map(a => `"${a.title}"`).join(', ')}.`);
-    }
-
-    return {
-      total_affected: affected.length,
-      correctly_excluded,
-      potentially_wrong,
-      summary: summaryLines.join(' '),
-    };
   },
 });
 
@@ -644,21 +738,22 @@ export const executeCorrection = createTool({
   description: `Exécute le pipeline complet de correction : diagnostic (tuning agent), simulation d'impact, et enregistrement de la proposition.
 Appelle cet outil après avoir collecté les réponses Q1/Q2/Q3 de l'utilisateur.
 Retourne un résultat typé avec feedback_id, résumé de la proposition et de la simulation.
-Ne demande PAS de confirmation à l'utilisateur — c'est le superviseur qui gère la phase de confirmation via applyCorrection.`,
+Ne demande PAS de confirmation à l'utilisateur — c'est le superviseur qui gère la phase de confirmation via les boutons UI.`,
   inputSchema: z.object({
     source_id: z.string().describe("source_id de l'AO concerné"),
     client_id: z.string().default('balthazar'),
     ao_context: z.string().describe('JSON stringifié des données AO (title, priority, matched_keywords, keyword_breakdown, rejet_raison, etc.)'),
-    user_reason: z.string().describe("Message original de l'utilisateur signalant l'erreur"),
-    q1_scope: z.string().describe('Réponse Q1 — portée choisie (quelle catégorie exclure)'),
-    q2_valid_case: z.string().describe('Réponse Q2 — AO similaire à préserver, ou "aucun"'),
+    user_reason: z.string().describe("Message original de l'utilisateur signalant l'erreur ou la pertinence"),
+    q1_scope: z.string().describe('Réponse Q1 — portée choisie (quelle catégorie exclure ou booster)'),
+    q2_valid_case: z.string().describe('Réponse Q2 — impact confirmé (AOs à préserver ou AOs à promouvoir)'),
     q3_confirmed_rule: z.string().describe('Réponse Q3 — reformulation confirmée de la règle'),
+    direction: z.enum(['exclude', 'include']).default('exclude').describe("'exclude' pour faux positif, 'include' pour faux négatif"),
   }),
   outputSchema: z.object({
     feedback_id: z.string(),
     proposal_summary: z.string(),
     simulation_summary: z.string(),
-    correction_type: z.enum(['keyword_red_flag', 'rag_chunk']),
+    correction_type: z.enum(['keyword_red_flag', 'rag_chunk', 'keyword_boost']),
     correction_value: z.string(),
   }),
   execute: async ({ context }) => {
@@ -680,14 +775,16 @@ ${context.ao_context}
 
 Message utilisateur : ${context.user_reason}
 
+Direction de la correction : ${context.direction === 'include' ? 'INCLUSION (faux négatif — AO pertinent sous-scoré)' : 'EXCLUSION (faux positif — AO non pertinent retenu)'}
+
 Réponses aux questions de clarification :
 Q1 (portée) : ${context.q1_scope}
-Q2 (cas valide connu) : ${context.q2_valid_case}
+Q2 (impact confirmé) : ${context.q2_valid_case}
 Q3 (reformulation confirmée) : ${context.q3_confirmed_rule}
 
 ${similarRulesContext}
 
-Propose une correction unique et ciblée.`;
+Propose une correction unique et ciblée. Pour direction=include, utilise correction_type=keyword_boost.`;
 
     const diagnosisResult = await aoFeedbackTuningAgent.generate(diagnosisPrompt, {
       output: feedbackProposalSchema,
@@ -698,6 +795,7 @@ Propose une correction unique et ciblée.`;
     // Step 3 — Determine the term to simulate
     const term =
       proposal.technical_payload.red_flag_to_add ??
+      proposal.technical_payload.keyword_to_boost ??
       proposal.technical_payload.chunk_title ??
       context.q3_confirmed_rule;
 
@@ -712,13 +810,23 @@ Propose une correction unique et ciblée.`;
       .or(`title.ilike.%${term}%,description.ilike.%${term}%`);
 
     const affected = affectedAOs ?? [];
-    const correctlyExcluded = affected.filter(ao => ao.priority === 'LOW' || ao.priority === null);
-    const potentiallyWrong = affected.filter(ao => ao.priority === 'HIGH' || ao.priority === 'MEDIUM');
+    let simulationSummary: string;
 
-    const simulationLines: string[] = [`${affected.length} AO(s) affecté(s) sur les 30 derniers jours.`];
-    if (correctlyExcluded.length > 0) simulationLines.push(`✅ ${correctlyExcluded.length} correctement exclus (déjà LOW).`);
-    if (potentiallyWrong.length > 0) simulationLines.push(`⚠️ ${potentiallyWrong.length} à vérifier (HIGH/MEDIUM) : ${potentiallyWrong.map(a => `"${a.title}"`).join(', ')}.`);
-    const simulationSummary = simulationLines.join(' ');
+    if (context.direction === 'include') {
+      const wouldPromote = affected.filter(ao => ao.priority === 'LOW' || ao.priority === null);
+      const alreadyPassing = affected.filter(ao => ao.priority === 'HIGH' || ao.priority === 'MEDIUM');
+      const simulationLines: string[] = [`${affected.length} AO(s) concerné(s) sur les 30 derniers jours.`];
+      if (wouldPromote.length > 0) simulationLines.push(`🔼 ${wouldPromote.length} AO(s) LOW seraient promus.`);
+      if (alreadyPassing.length > 0) simulationLines.push(`✅ ${alreadyPassing.length} déjà HIGH/MEDIUM — pas d'impact.`);
+      simulationSummary = simulationLines.join(' ');
+    } else {
+      const correctlyExcluded = affected.filter(ao => ao.priority === 'LOW' || ao.priority === null);
+      const potentiallyWrong = affected.filter(ao => ao.priority === 'HIGH' || ao.priority === 'MEDIUM');
+      const simulationLines: string[] = [`${affected.length} AO(s) affecté(s) sur les 30 derniers jours.`];
+      if (correctlyExcluded.length > 0) simulationLines.push(`✅ ${correctlyExcluded.length} correctement exclus (déjà LOW).`);
+      if (potentiallyWrong.length > 0) simulationLines.push(`⚠️ ${potentiallyWrong.length} à vérifier (HIGH/MEDIUM) : ${potentiallyWrong.map(a => `"${a.title}"`).join(', ')}.`);
+      simulationSummary = simulationLines.join(' ');
+    }
 
     // Step 5 — Record the proposal (pending confirmation)
     const { data: feedbackRow } = await supabase
@@ -748,6 +856,64 @@ Propose une correction unique et ciblée.`;
       simulation_summary: simulationSummary,
       correction_type: proposal.correction_type,
       correction_value: term,
+    };
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tool 11 — manualOverride
+// Direct priority change without Q1/Q2/Q3 protocol.
+// Used when user explicitly asks to promote/demote an AO ("mets cet AO en HIGH").
+// Returns a typed result for UI confirmation (ManualOverrideCard).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const manualOverride = createTool({
+  id: 'manualOverride',
+  description: `Change directement la priorité d'un AO sans passer par le pipeline de correction.
+Utilise cet outil UNIQUEMENT quand l'utilisateur demande explicitement un changement de priorité ("mets cet AO en HIGH", "passe-le en prioritaire", "cet AO ne devrait pas être LOW").
+Ne pas utiliser pour des corrections de scoring — utiliser executeCorrection dans ce cas.
+Retourne un résultat pour confirmation UI — ne pas appliquer immédiatement.`,
+  inputSchema: z.object({
+    source_id: z.string().describe("source_id de l'AO"),
+    client_id: z.string().default('balthazar'),
+    new_priority: z.enum(['HIGH', 'MEDIUM', 'LOW']).describe('Nouvelle priorité demandée par l\'utilisateur'),
+    reason: z.string().describe('Raison du changement de priorité'),
+  }),
+  outputSchema: z.object({
+    feedback_id: z.string(),
+    ao_title: z.string(),
+    current_priority: z.string().nullable(),
+    new_priority: z.string(),
+  }),
+  execute: async ({ context }) => {
+    const { data: ao } = await supabase
+      .from('appels_offres')
+      .select('title, priority')
+      .eq('source_id', context.source_id)
+      .single();
+
+    const { data: feedbackRow } = await supabase
+      .from('ao_feedback')
+      .insert({
+        source_id: context.source_id,
+        client_id: context.client_id,
+        feedback: context.new_priority === 'HIGH' ? 'relevant' : 'not_relevant',
+        reason: context.reason,
+        correction_type: 'manual_override',
+        correction_value: context.new_priority,
+        agent_diagnosis: `Changement de priorité manuel : ${ao?.priority ?? '?'} → ${context.new_priority}`,
+        agent_proposal: `Priorité de l'AO "${ao?.title ?? context.source_id}" changée en ${context.new_priority}`,
+        status: 'agent_proposed',
+        source: 'chat',
+      })
+      .select()
+      .single();
+
+    return {
+      feedback_id: feedbackRow?.id ?? '',
+      ao_title: ao?.title ?? context.source_id,
+      current_priority: ao?.priority ?? null,
+      new_priority: context.new_priority,
     };
   },
 });

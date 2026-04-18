@@ -17,11 +17,12 @@ import { openai as openaiProvider } from '@ai-sdk/openai';
 export const feedbackProposalSchema = z.object({
   diagnosis_fr: z.string().describe('Explication concise en français du pourquoi cet AO a été retenu à tort'),
   proposal_fr: z.string().describe('Description en français de la correction proposée'),
-  correction_type: z.enum(['keyword_red_flag', 'rag_chunk']).describe(
-    'Type de correction : keyword_red_flag pour ajouter un mot-clé excluant, rag_chunk pour ajouter/modifier une règle RAG'
+  correction_type: z.enum(['keyword_red_flag', 'rag_chunk', 'keyword_boost']).describe(
+    'Type de correction : keyword_red_flag pour ajouter un mot-clé excluant, rag_chunk pour ajouter/modifier une règle RAG, keyword_boost pour booster un mot-clé pertinent (direction=include)'
   ),
   technical_payload: z.object({
     red_flag_to_add: z.string().optional().describe('Le mot-clé ou expression à ajouter comme red flag (si correction_type=keyword_red_flag)'),
+    keyword_to_boost: z.string().optional().describe('Le mot-clé ou expression à booster (si correction_type=keyword_boost)'),
     chunk_title: z.string().optional().describe('Titre du chunk RAG à insérer (si correction_type=rag_chunk)'),
     chunk_content: z.string().optional().describe('Contenu du chunk RAG (règle ou contexte à ajouter)'),
     chunk_type: z.string().optional().describe('Type du chunk : exclusion_rule, disambiguation_rule, sector_definition, etc.'),
@@ -67,8 +68,9 @@ Les AO retenus à tort sont généralement :
 2. Croise avec les clarifications de l'utilisateur (portée choisie, cas valide à préserver)
 3. Vérifie que la correction envisagée ne crée pas de doublon avec les règles existantes fournies
 4. Propose UNE seule correction parmi :
-   - **keyword_red_flag** : si le problème est un terme générique hors périmètre (ex: "exploitation", "fourniture")
-   - **rag_chunk** : si le problème nécessite une règle nuancée (ex: distinguer conseil stratégique vs opérationnel)
+   - **keyword_red_flag** : si le problème est un terme générique hors périmètre (ex: "exploitation", "fourniture") — direction=exclude
+   - **rag_chunk** : si le problème nécessite une règle nuancée (ex: distinguer conseil stratégique vs opérationnel) — direction=exclude
+   - **keyword_boost** : si l'AO est pertinent mais sous-scoré (ex: un secteur ou concept que Balthazar couvre mais qui n'est pas dans le lexique) — direction=include. Pour keyword_boost, renseigne technical_payload.keyword_to_boost.
 
 ## Format de réponse
 Réponds uniquement avec les champs du schéma. Sois concis et précis.
