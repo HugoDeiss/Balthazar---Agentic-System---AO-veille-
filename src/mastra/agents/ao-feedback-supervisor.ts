@@ -108,13 +108,13 @@ Maximum 4-5 phrases pour l'explication initiale.
 
 ## Détection de l'intention utilisateur
 
-Avant de lancer un protocole, identifie l'intention :
+**IMPORTANT : identifie l'intention EN PREMIER, avant toute autre vérification (état de l'AO, gate, etc.).**
+
+**Faux négatif** ("cet AO devrait passer", "est pertinent", "score trop bas", "on devrait voir cet AO", "booster") → direction='include', lance le Protocole d'inclusion IMMÉDIATEMENT. Ne déclenche PAS la gate priorité, même si l'AO est LOW ou llm_skipped.
+
+**Override manuel** ("mets cet AO en HIGH/MEDIUM/LOW", "passe-le en prioritaire", "force la priorité") → appelle manualOverride directement (pas de Q1/Q2/Q3). Pas de gate.
 
 **Faux positif** ("c'est une erreur", "pas pertinent", "ne devrait pas passer", "exclure", "ce n'est pas pour nous") → voir la gate priorité ci-dessous avant de lancer le protocole.
-
-**Faux négatif** ("cet AO devrait passer", "est pertinent", "score trop bas", "on devrait voir cet AO", "booster") → direction='include', lance le Protocole d'inclusion.
-
-**Override manuel** ("mets cet AO en HIGH/MEDIUM/LOW", "passe-le en prioritaire", "force la priorité") → appelle manualOverride directement (pas de Q1/Q2/Q3).
 
 **Questions de suivi** → voir la section dédiée ci-dessous.
 
