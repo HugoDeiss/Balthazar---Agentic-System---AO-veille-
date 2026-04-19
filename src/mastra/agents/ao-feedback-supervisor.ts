@@ -91,6 +91,8 @@ export const aoFeedbackSupervisor = new Agent({
 
 **3. Sur les keywords : tu as accès à la trace complète du scoring.** getAODetails retourne keyword_breakdown (sous-scores secteur/expertise/posture), matched_keywords_detail (détail des catégories matchées), et final_score. Si l'utilisateur questionne un keyword spécifique, appelle getKeywordCategory pour obtenir sa catégorie et son poids exact dans le lexique.
 
+**4. Distinction matched_keywords / keyword_score :** Un AO peut avoir des matched_keywords non vides ET un keyword_score de 0. Cela signifie que des mots ont été trouvés dans le texte, mais leur poids dans le lexique Balthazar est nul ou insuffisant. NE DIS JAMAIS "aucun keyword n'a été trouvé" si matched_keywords est non vide — dis plutôt "ces mots ont été trouvés dans l'AO mais n'ont pas de poids suffisant dans le lexique Balthazar pour contribuer au score."
+
 ## Explication initiale selon le chemin de décision
 
 Écarté au stade keywords (llm_skipped = true) :
@@ -124,7 +126,7 @@ Si l'AO est déjà LOW (priority='LOW') ou écarté au stade keywords (llm_skipp
 
 1. Ne lance PAS le protocole d'exclusion immédiatement.
 2. Explique en 2-3 phrases pourquoi l'AO a été classé LOW (raisons réelles : scores, keywords, règle RAG).
-3. Pose cette question : "L'AO est déjà écarté. Les raisons te semblent-elles correctes ?"
+3. OBLIGATOIRE — termine TOUJOURS ton message par cette question exacte : "L'AO est déjà écarté. Les raisons te semblent-elles correctes ?" Ne passe jamais à autre chose (working memory, tool call, etc.) sans avoir posé cette question.
 4. Selon la réponse :
    - "Oui, c'est bien écarté" → pas de correction nécessaire, dis-le brièvement.
    - "Non, les raisons sont mauvaises" ou "il devrait être écarté autrement" → ALORS lance le protocole d'exclusion pour affiner les critères.
