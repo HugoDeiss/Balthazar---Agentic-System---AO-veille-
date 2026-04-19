@@ -630,31 +630,28 @@ function findMatchesWithDeduplication(
   const matchedKeywords = new Set<string>();
   const coveredRanges: Array<[number, number]> = []; // [start, end]
   
-  // 1. Keywords (expressions longues d'abord)
+  // 1. Keywords (expressions longues d'abord) — avec word boundary
   for (const keyword of sortedKeywords) {
     const normalizedKw = normalizeText(keyword);
-    let searchIndex = 0;
-    
-    while (true) {
-      const index = fullText.indexOf(normalizedKw, searchIndex);
-      if (index === -1) break;
-      
-      const start = index;
-      const end = index + normalizedKw.length;
-      
-      // Vérifier si cette plage est déjà couverte
+    // Utilise lookbehind/lookahead plutôt que \b pour gérer les apostrophes françaises
+    const escaped = normalizedKw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?<![a-zA-Z])${escaped}(?![a-zA-Z])`, 'g');
+
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(fullText)) !== null) {
+      const start = match.index;
+      const end = start + normalizedKw.length;
+
       const isCovered = coveredRanges.some(
-        ([coveredStart, coveredEnd]) => 
+        ([coveredStart, coveredEnd]) =>
           start >= coveredStart && end <= coveredEnd
       );
-      
+
       if (!isCovered) {
         matchedKeywords.add(keyword);
         coveredRanges.push([start, end]);
         break; // 1 seule occurrence par keyword suffit
       }
-      
-      searchIndex = index + 1;
     }
   }
   
@@ -955,15 +952,16 @@ export function calculateEnhancedKeywordScore(
 export function calculateKeywordScore(
   title: string,
   description: string | undefined,
-  keywords: string[] | undefined,
-  acheteur: string | undefined
+  _keywords: string[] | undefined,
+  _acheteur: string | undefined
 ): KeywordScoreResult {
-  // 1. Construire texte analysable (depuis aoSchema réel)
+  // 1. Construire texte analysable — titre + description uniquement.
+  // On exclut le champ keywords BOAMP (catégories CPV génériques comme "transports") et l'acheteur
+  // pour éviter les faux positifs sur des AOs hors-périmètre. Les clients de référence sont
+  // détectés dans calculateEnhancedKeywordScore qui a accès à l'acheteur.
   const fullText = normalizeText([
     title,
     description || '',
-    keywords?.join(' ') || '',
-    acheteur || ''
   ].join(' '));
 
   // 2. VÉRIFIER RED FLAGS (signal mais pas bloquant)
