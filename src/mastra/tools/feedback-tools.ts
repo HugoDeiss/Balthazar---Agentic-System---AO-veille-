@@ -18,8 +18,17 @@
  */
 
 import { createTool } from '@mastra/core/tools';
+import { Agent } from '@mastra/core';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
+import { openai } from '@ai-sdk/openai';
+
+// Minimal agent for extracting business terms from AO text (avoids ai@4.x / @ai-sdk@2.x version mismatch)
+const termExtractorAgent = new Agent({
+  name: 'term-extractor',
+  model: openai('gpt-4o-mini'),
+  instructions: "Tu extrais des termes métier pertinents depuis des titres et descriptions d'appels d'offres publics français. Réponds uniquement en JSON.",
+});
 import { insertAndIndexChunk } from '../../utils/rag-indexer';
 import { embedQuery, getVectorStore } from './balthazar-rag-tools';
 import { balthazarLexicon, normalizeText } from '../../utils/balthazar-keywords';
@@ -265,26 +274,40 @@ Pour un faux négatif (direction=include) : options de boost basées sur les key
   execute: async ({ context }) => {
     const { data } = await supabase
       .from('appels_offres')
-      .select('title, matched_keywords, keyword_breakdown')
+      .select('title, description, matched_keywords, keyword_breakdown')
       .eq('source_id', context.source_id)
       .single();
 
-    const keywords: string[] = ((data?.matched_keywords as string[]) ?? []).slice(0, 2);
     const choices: Array<{ letter: string; label: string; value: string }> = [];
     const letters = ['A', 'B', 'C'];
 
     if (context.direction === 'exclude') {
+      const keywords: string[] = ((data?.matched_keywords as string[]) ?? []).slice(0, 2);
       keywords.forEach((kw, i) => {
         choices.push({ letter: letters[i], label: `Les AOs liés à "${kw}"`, value: kw });
       });
       choices.push({ letter: letters[choices.length], label: 'Autre (je précise)', value: 'autre' });
       return { question: 'On exclut :', choices, direction: 'exclude' as const };
     } else {
-      keywords.forEach((kw, i) => {
-        choices.push({ letter: letters[i], label: `Booster les AOs liés à "${kw}"`, value: kw });
+      // For inclusion, matched_keywords is empty on under-scored AOs — use LLM to extract relevant terms
+      let suggestedTerms: string[] = [];
+      try {
+        const result = await termExtractorAgent.generate([{
+          role: 'user',
+          content: `Titre AO: "${data?.title ?? ''}"
+Description: "${(data?.description as string ?? '').slice(0, 400)}"
+
+Extrais exactement 2 termes métier pertinents (2-4 mots max chacun) qui caractérisent le secteur ou l'expertise de cet appel d'offres. Réponds UNIQUEMENT au format JSON: ["terme1", "terme2"]`,
+        }]);
+        suggestedTerms = JSON.parse(result.text);
+      } catch {
+        // fallback: empty, only "Autre" option
+      }
+      suggestedTerms.slice(0, 2).forEach((term, i) => {
+        choices.push({ letter: letters[i], label: `Booster les AOs liés à "${term}"`, value: term });
       });
       choices.push({ letter: letters[choices.length], label: 'Autre (je précise)', value: 'autre' });
-      return { question: 'On booste :', choices, direction: 'include' as const };
+      return { question: 'Quel terme booster pour inclure cet AO ?', choices, direction: 'include' as const };
     }
   },
 });
@@ -829,12 +852,15 @@ Propose une correction unique et ciblée. Pour direction=include, utilise correc
 
     const proposal = diagnosisResult.object;
 
-    // Step 3 — Determine the term to simulate
-    const term =
-      proposal.technical_payload.red_flag_to_add ??
-      proposal.technical_payload.keyword_to_boost ??
-      proposal.technical_payload.chunk_title ??
-      context.q3_confirmed_rule;
+    // Enforce direction → correction_type mapping — tuning agent can hallucinate the wrong type
+    if (context.direction === 'include') {
+      proposal.correction_type = 'keyword_boost';
+    }
+
+    // Step 3 — Determine the term to simulate (direction-aware to avoid exclusion term winning)
+    const term = context.direction === 'include'
+      ? (proposal.technical_payload.keyword_to_boost ?? context.q3_confirmed_rule)
+      : (proposal.technical_payload.red_flag_to_add ?? proposal.technical_payload.chunk_title ?? context.q3_confirmed_rule);
 
     // Step 4 — Simulate impact
     const since = new Date();
@@ -871,7 +897,7 @@ Propose une correction unique et ciblée. Pour direction=include, utilise correc
       .insert({
         source_id: context.source_id,
         client_id: context.client_id,
-        feedback: 'not_relevant',
+        feedback: context.direction === 'include' ? 'relevant' : 'not_relevant',
         reason: context.user_reason,
         correction_type: proposal.correction_type,
         correction_value: term,
