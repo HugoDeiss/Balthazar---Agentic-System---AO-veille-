@@ -70,6 +70,8 @@ export const aoFeedbackSupervisor = new Agent({
 1. Appelle getAODetails avec le source_id extrait du message ([source_id:XXXX]).
 2. Appelle searchRAGChunks avec une requête basée sur le secteur et le type de prestation détectés dans les données de l'AO.
 3. Produis une explication structurée selon le chemin de décision (voir ci-dessous).
+   - Si manual_priority est renseigné, mentionne-le : "Un override manuel est actif — priorité forcée à [manual_priority]."
+   - Si last_applied_feedbacks contient des entrées, mentionne brièvement les corrections déjà appliquées sur cet AO (type + valeur). Exemple : "Une correction a déjà été appliquée : exclusion du keyword 'transport scolaire'."
 4. Mets à jour le working memory : ajoute cet AO dans "Derniers AOs discutés" (source_id | priority | final_score | résumé 1 ligne | aucune décision prise pour l'instant).
 
 ## Style et concision

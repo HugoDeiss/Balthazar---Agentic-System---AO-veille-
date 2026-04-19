@@ -46,6 +46,7 @@ export const getAODetails = createTool({
     description: z.string().nullable(),
     acheteur: z.string().nullable(),
     priority: z.string().nullable(),
+    manual_priority: z.string().nullable(),
     keyword_score: z.number().nullable(),
     semantic_score: z.number().nullable(),
     final_score: z.number().nullable(),
@@ -60,12 +61,19 @@ export const getAODetails = createTool({
     decision_gate: z.string().nullable(),
     llm_skipped: z.boolean().nullable(),
     llm_skip_reason: z.string().nullable(),
+    last_applied_feedbacks: z.array(z.object({
+      id: z.string(),
+      correction_type: z.string(),
+      correction_value: z.string().nullable(),
+      created_by: z.string().nullable(),
+      processed_at: z.string().nullable(),
+    })),
   }),
   execute: async ({ context }) => {
     const { data } = await supabase
       .from('appels_offres')
       .select(`
-        title, description, acheteur, priority,
+        title, description, acheteur, priority, manual_priority,
         keyword_score, semantic_score, final_score, confidence_decision,
         matched_keywords, matched_keywords_detail,
         keyword_breakdown, semantic_reason, rejet_raison, human_readable_reason,
@@ -74,7 +82,36 @@ export const getAODetails = createTool({
       .eq('source_id', context.source_id)
       .single();
 
-    return data ?? {};
+    const { data: feedbacks } = await supabase
+      .from('ao_feedback')
+      .select('id, correction_type, correction_value, created_by, processed_at')
+      .eq('source_id', context.source_id)
+      .eq('status', 'applied')
+      .order('processed_at', { ascending: false })
+      .limit(3);
+
+    return {
+      title: data?.title ?? null,
+      description: data?.description ?? null,
+      acheteur: data?.acheteur ?? null,
+      priority: data?.priority ?? null,
+      manual_priority: data?.manual_priority ?? null,
+      keyword_score: data?.keyword_score ?? null,
+      semantic_score: data?.semantic_score ?? null,
+      final_score: data?.final_score ?? null,
+      confidence_decision: data?.confidence_decision ?? null,
+      matched_keywords: data?.matched_keywords ?? null,
+      matched_keywords_detail: data?.matched_keywords_detail ?? null,
+      keyword_breakdown: data?.keyword_breakdown ?? null,
+      semantic_reason: data?.semantic_reason ?? null,
+      rejet_raison: data?.rejet_raison ?? null,
+      human_readable_reason: data?.human_readable_reason ?? null,
+      rag_sources_detail: data?.rag_sources_detail ?? null,
+      decision_gate: data?.decision_gate ?? null,
+      llm_skipped: data?.llm_skipped ?? null,
+      llm_skip_reason: data?.llm_skip_reason ?? null,
+      last_applied_feedbacks: feedbacks ?? [],
+    };
   },
 });
 
