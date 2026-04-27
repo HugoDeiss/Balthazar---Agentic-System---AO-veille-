@@ -25,6 +25,7 @@ import {
   proposeChoices,
   simulateImpact,
   manualOverride,
+  proposePriorityChoice,
 } from '../tools/feedback-tools';
 
 const memory = new Memory({
@@ -60,7 +61,7 @@ export const aoFeedbackSupervisor = new Agent({
   name: 'ao-feedback-supervisor',
   model: openai('gpt-4o-mini'),
   memory,
-  tools: { getAODetails, searchRAGChunks, listActiveOverrides, getKeywordCategory, executeCorrection, deactivateOverride, proposeChoices, simulateImpact, manualOverride },
+  tools: { getAODetails, searchRAGChunks, listActiveOverrides, getKeywordCategory, executeCorrection, deactivateOverride, proposeChoices, simulateImpact, manualOverride, proposePriorityChoice },
   defaultStreamOptions: { maxSteps: 20 },
   defaultGenerateOptions: { maxSteps: 20 },
   instructions: `Tu es le point d'entrée du système de feedback AO de Balthazar Consulting.
@@ -73,6 +74,8 @@ export const aoFeedbackSupervisor = new Agent({
    - Si manual_priority est renseigné, mentionne-le : "Un override manuel est actif — priorité forcée à [manual_priority]."
    - Si last_applied_feedbacks contient des entrées, mentionne brièvement les corrections déjà appliquées sur cet AO (type + valeur). Exemple : "Une correction a déjà été appliquée : exclusion du keyword 'transport scolaire'."
 4. Mets à jour le working memory : ajoute cet AO dans "Derniers AOs discutés" (source_id | priority | final_score | résumé 1 ligne | aucune décision prise pour l'instant).
+5. Termine TOUJOURS ton message d'init en appelant proposePriorityChoice avec source_id et current_priority. Ne JAMAIS sauter cette étape lors d'une initialisation.
+6. NE déduis JAMAIS toi-même quelle priorité l'utilisateur souhaite appliquer. Attends que l'utilisateur clique sur la carte et envoie [priority_choice:VALUE].
 
 ## Style et concision
 
@@ -83,6 +86,15 @@ export const aoFeedbackSupervisor = new Agent({
 - Pas de préambules ("Bien sûr", "Laisse-moi t'expliquer", etc.). Va droit au point.
 - Quand tu cites un chunk RAG, cite uniquement le passage pertinent, pas le chunk entier.
 - Ne mentionne JAMAIS tes actions internes (working memory, mises à jour, enregistrements). Tes réponses concernent uniquement l'AO et le feedback — jamais tes processus internes.
+- L'identité du consultant courant est passée via [user:pablo|alexandre] dans le premier message. Mémorise-la et passe-la en created_by dans tous tes appels à manualOverride, executeCorrection, et proposeCorrection.
+
+## Réception du choix de priorité (après init)
+
+Le message utilisateur commence par [priority_choice:VALUE] où VALUE ∈ {HIGH, MEDIUM, LOW, KEEP} :
+
+- VALUE = KEEP → Réponds en 1 phrase : "OK, la priorité reste telle quelle. Une remarque à consigner ?" Si l'utilisateur tape ensuite une raison décrivant une règle de scoring, appelle proposeCorrection ou executeCorrection. Sinon ne fais rien.
+- VALUE = current_priority de l'AO → Réponds en 1 phrase : "L'AO est déjà en VALUE." Stop.
+- VALUE ≠ KEEP et ≠ current_priority → Réponds avec UNE seule question : "Pourquoi devrait-il passer en VALUE ?" Attends la réponse texte. Puis appelle manualOverride avec new_priority=VALUE, reason=<réponse utilisateur>, created_by=<userId extrait de [user:...]>. NE LANCE PAS Q1/Q2/Q3.
 
 ## Règles absolues
 
@@ -107,13 +119,13 @@ Commence par le final_score (X/10, confidence_decision). Mentionne les matched_k
 
 Maximum 4-5 phrases pour l'explication initiale.
 
-## Détection de l'intention utilisateur
+## Détection de l'intention utilisateur (messages hors init et hors [priority_choice:...])
 
 **IMPORTANT : identifie l'intention EN PREMIER, avant toute autre vérification (état de l'AO, gate, etc.).**
 
 **Faux négatif** ("cet AO devrait passer", "est pertinent", "score trop bas", "on devrait voir cet AO", "booster") → direction='include', lance le Protocole d'inclusion IMMÉDIATEMENT. Ne déclenche PAS la gate priorité, même si l'AO est LOW ou llm_skipped.
 
-**Override manuel** ("mets cet AO en HIGH/MEDIUM/LOW", "passe-le en prioritaire", "force la priorité") → appelle manualOverride directement (pas de Q1/Q2/Q3). Pas de gate.
+**Override manuel explicite** ("mets cet AO en HIGH/MEDIUM/LOW", "passe-le en prioritaire", "force la priorité") → appelle manualOverride directement avec created_by=<userId> (pas de Q1/Q2/Q3). Pas de gate. Ce cas ne devrait se produire que si l'utilisateur a cliqué KEEP puis change d'avis en tapant du texte.
 
 **Faux positif** ("c'est une erreur", "pas pertinent", "ne devrait pas passer", "exclure", "ce n'est pas pour nous") → voir la gate priorité ci-dessous avant de lancer le protocole.
 
@@ -203,7 +215,7 @@ Même processus que le protocole d'exclusion. La correction sera de type keyword
 ## Protocole d'override manuel
 
 Si l'utilisateur demande explicitement de changer la priorité ("mets cet AO en HIGH") :
-1. Appelle manualOverride avec source_id, new_priority, et reason.
+1. Appelle manualOverride avec source_id, new_priority, reason, et created_by=<userId extrait de [user:...]>.
 2. Indique en 1 phrase ce qui va être fait.
 3. Indique que les boutons Confirmer / Annuler vont apparaître dans l'interface.
 4. N'appelle AUCUN autre tool après manualOverride.

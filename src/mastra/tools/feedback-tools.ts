@@ -341,6 +341,7 @@ export const proposeCorrection = createTool({
     proposal_fr: z.string().describe('Description en français de ce qui sera modifié'),
     impact_fr: z.string().describe("Impact attendu en une phrase (ex: à partir de demain, les AOs sur X seront exclus)"),
     user_reason: z.string().describe("Raison fournie par l'utilisateur"),
+    created_by: z.string().optional().describe("Identité du consultant courant (pablo/alexandre)"),
   }),
   outputSchema: z.object({
     feedback_id: z.string(),
@@ -361,6 +362,7 @@ export const proposeCorrection = createTool({
         agent_proposal: context.proposal_fr,
         status: 'agent_proposed',
         source: 'chat',
+        created_by: context.created_by ?? null,
       })
       .select()
       .single();
@@ -808,6 +810,7 @@ Ne demande PAS de confirmation à l'utilisateur — c'est le superviseur qui gè
     q2_valid_case: z.string().describe('Réponse Q2 — impact confirmé (AOs à préserver ou AOs à promouvoir)'),
     q3_confirmed_rule: z.string().describe('Réponse Q3 — reformulation confirmée de la règle'),
     direction: z.enum(['exclude', 'include']).default('exclude').describe("'exclude' pour faux positif, 'include' pour faux négatif"),
+    created_by: z.string().optional().describe("Identité du consultant courant (pablo/alexandre)"),
   }),
   outputSchema: z.object({
     feedback_id: z.string(),
@@ -906,6 +909,7 @@ Propose une correction unique et ciblée. Pour direction=include, utilise correc
         agent_proposal: proposal.proposal_fr,
         status: 'agent_proposed',
         source: 'chat',
+        created_by: context.created_by ?? null,
       })
       .select()
       .single();
@@ -941,6 +945,7 @@ Retourne un résultat pour confirmation UI — ne pas appliquer immédiatement.`
     client_id: z.string().default('balthazar'),
     new_priority: z.enum(['HIGH', 'MEDIUM', 'LOW']).describe('Nouvelle priorité demandée par l\'utilisateur'),
     reason: z.string().describe('Raison du changement de priorité'),
+    created_by: z.string().describe("Identité du consultant courant (pablo/alexandre)"),
   }),
   outputSchema: z.object({
     feedback_id: z.string(),
@@ -968,6 +973,7 @@ Retourne un résultat pour confirmation UI — ne pas appliquer immédiatement.`
         agent_proposal: `Priorité de l'AO "${ao?.title ?? context.source_id}" changée en ${context.new_priority}`,
         status: 'agent_proposed',
         source: 'chat',
+        created_by: context.created_by,
       })
       .select()
       .single();
@@ -979,4 +985,31 @@ Retourne un résultat pour confirmation UI — ne pas appliquer immédiatement.`
       new_priority: context.new_priority,
     };
   },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tool 12 — proposePriorityChoice
+// Displays the interactive priority selector card in the UI.
+// Called at the end of init (after getAODetails + searchRAGChunks).
+// The user clicks a button; their choice arrives as [priority_choice:VALUE].
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const proposePriorityChoice = createTool({
+  id: 'proposePriorityChoice',
+  description: `Affiche la carte interactive de choix de priorité cible (HIGH/MEDIUM/LOW/KEEP).
+À appeler EN FIN d'initialisation, après getAODetails et searchRAGChunks.
+L'interface affichera 4 boutons. Le choix de l'utilisateur arrivera comme [priority_choice:VALUE] au tour suivant.
+NE PAS appeler si une session de correction est déjà en cours.`,
+  inputSchema: z.object({
+    source_id: z.string().describe("source_id de l'AO"),
+    current_priority: z.enum(['HIGH', 'MEDIUM', 'LOW']).nullable().describe('Priorité actuelle de l\'AO'),
+  }),
+  outputSchema: z.object({
+    source_id: z.string(),
+    current_priority: z.enum(['HIGH', 'MEDIUM', 'LOW']).nullable(),
+  }),
+  execute: async ({ context }) => ({
+    source_id: context.source_id,
+    current_priority: context.current_priority,
+  }),
 });
