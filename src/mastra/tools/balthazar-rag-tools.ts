@@ -15,10 +15,10 @@
  * - aoTextVerificationTool treats AO text as untrusted data (prompt-injection safe).
  */
 
-import { createTool } from '@mastra/core';
+import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { openai as openaiProvider } from '@ai-sdk/openai';
-import { embedMany, generateObject } from 'ai-v5';
+import { embedMany, generateObject } from 'ai';
 import { PgVector } from '@mastra/pg';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
@@ -33,6 +33,7 @@ export function getVectorStore(): PgVector {
   if (!_vectorStore) {
     console.log('[RAG] Initializing PgVector, DATABASE_URL present:', !!process.env.DATABASE_URL);
     _vectorStore = new PgVector({
+      id: 'balthazar-rag-pgvector',
       connectionString: process.env.DATABASE_URL!,
     });
   }
@@ -93,9 +94,7 @@ Returns ranked policy chunks with chunk_id (cite these in rag_sources).`,
     ]).nullable().describe('ALWAYS specify a type when you know it — this avoids retrieving irrelevant chunks. Use null only as last resort. sector check → sector_definition | mission check → mandate_type or exclusion_rule | ambiguous term → disambiguation_rule | priority → priority_rule'),
   }),
 
-  execute: async ({ context }) => {
-    const { query, topK, filter_type } = context;
-
+  execute: async ({ query, topK, filter_type }) => {
     try {
       const queryVector = await embedQuery(query);
       const store = getVectorStore();
@@ -164,8 +163,7 @@ Returns similar case study chunks with chunk_id (cite these in rag_sources).`,
       .describe('ALWAYS specify the sector when known — avoids retrieving irrelevant case studies from other sectors.'),
   }),
 
-  execute: async ({ context }) => {
-    const { query, topK, filter_secteur } = context;
+  execute: async ({ query, topK, filter_secteur }) => {
 
     try {
       const queryVector = await embedQuery(query);
@@ -282,8 +280,7 @@ Returns: match details including statut, secteur, type_org, and match_confidence
     acheteur: z.string().describe('The AO buyer name (acheteur field from the AO)'),
   }),
 
-  execute: async ({ context }) => {
-    const { acheteur } = context;
+  execute: async ({ acheteur }) => {
     if (!acheteur || acheteur.trim() === '') {
       return { found: false, acheteur, match: null };
     }
@@ -392,8 +389,7 @@ Returns for each condition: met (true/false/unknown) + evidence snippets.`,
     conditions: z.array(z.string()).describe('List of conditions to verify against the AO text (from policy rules)'),
   }),
 
-  execute: async ({ context }) => {
-    const { ao_text, conditions } = context;
+  execute: async ({ ao_text, conditions }) => {
 
     if (!conditions || conditions.length === 0) {
       return { status: 'skipped', reason: 'No conditions to verify', verifications: [] };

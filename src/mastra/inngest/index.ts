@@ -28,7 +28,7 @@ function createAoVeilleFunction(mastra: Mastra) {
       // the workflow won't re-execute (idempotency at step level).
       return step.run('run-ao-veille', async () => {
         const workflow = mastra.getWorkflow('aoVeilleWorkflow');
-        const run = await workflow.createRunAsync();
+        const run = await workflow.createRun();
 
         // Fire and forget — do NOT await run.start()
         // The workflow runs async in Mastra Cloud's own execution engine.
@@ -63,7 +63,7 @@ function createFeedbackProcessorFunction(mastra: Mastra) {
     async ({ event, step }) => {
       await step.run('run-feedback-workflow', async () => {
         const workflow = mastra.getWorkflow('feedbackWorkflow');
-        const run = await workflow.createRunAsync();
+        const run = await workflow.createRun();
         await run.start({ inputData: { feedbackId: event.data.feedbackId } });
       });
     },

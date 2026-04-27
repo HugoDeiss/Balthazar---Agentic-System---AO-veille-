@@ -6,7 +6,7 @@
  */
 
 import { openai as openaiProvider } from '@ai-sdk/openai';
-import { embedMany } from 'ai-v5';
+import { embedMany } from 'ai';
 import { PgVector } from '@mastra/pg';
 
 const EMBEDDING_MODEL = 'text-embedding-3-small';
@@ -16,6 +16,7 @@ let _vectorStore: PgVector | null = null;
 function getVectorStore(): PgVector {
   if (!_vectorStore) {
     _vectorStore = new PgVector({
+      id: 'balthazar-rag-indexer',
       connectionString: process.env.DATABASE_URL!,
     });
   }
@@ -44,16 +45,9 @@ export async function insertAndIndexChunk(payload: ChunkPayload): Promise<void> 
 
   await store.upsert({
     indexName,
-    vectors: [
-      {
-        id: (metadata.chunk_id as string) ?? `feedback_${Date.now()}`,
-        vector,
-        metadata: {
-          ...metadata,
-          text,
-        },
-      },
-    ],
+    vectors: [vector],
+    ids: [(metadata.chunk_id as string) ?? `feedback_${Date.now()}`],
+    metadata: [{ ...metadata, text }],
   });
 
   console.log(`[rag-indexer] Chunk inserted in "${indexName}" index (id: ${metadata.chunk_id})`);

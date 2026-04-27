@@ -945,7 +945,9 @@ const saveResultsStep = createStep({
     until: z.string().optional()
   }),
   execute: async ({ inputData }) => {
-    const { all: scored, client, stats, since, until } = inputData;
+    const { all: scored, client, stats } = inputData;
+    const since = (inputData as any).since as string | undefined;
+    const until = (inputData as any).until as string | undefined;
     
     // Gérer le cas où client est null (aucun AO à sauvegarder)
     if (!client) {
@@ -1184,8 +1186,8 @@ const saveResultsStep = createStep({
       mediumBySource: inputData.mediumBySource,
       lowBySource: inputData.lowBySource,
       client: inputData.client,
-      since: inputData.since,
-      until: inputData.until
+      since: (inputData as any).since as string | undefined,
+      until: (inputData as any).until as string | undefined
     };
   }
 });
@@ -2059,7 +2061,7 @@ const processOneAOWorkflow = createWorkflow({
         }
         return isContextOnly;
       },
-      handleContextOnlyAOStep
+      handleContextOnlyAOStep as any
     ],
     // ────────────────────────────────────────────────────
     // BRANCH 1 : AO ANNULÉ

@@ -175,12 +175,13 @@ export async function handleFeedbackConfirm(req: Request, mastra: Mastra): Promi
 
   try {
     const workflow = mastra.getWorkflow('feedbackWorkflow');
-    const run = await workflow.getWorkflowRunById(runId);
+    const state = await workflow.getWorkflowRunById(runId);
 
-    if (!run) {
+    if (!state) {
       return new Response('Run introuvable.', { status: 404 });
     }
 
+    const run = await workflow.createRun({ runId });
     await run.resume({
       step: 'user-confirm',
       resumeData: { approved },

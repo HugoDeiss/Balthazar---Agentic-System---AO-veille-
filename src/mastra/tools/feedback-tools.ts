@@ -18,13 +18,14 @@
  */
 
 import { createTool } from '@mastra/core/tools';
-import { Agent } from '@mastra/core';
+import { Agent } from '@mastra/core/agent';
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { openai } from '@ai-sdk/openai';
 
 // Minimal agent for extracting business terms from AO text (avoids ai@4.x / @ai-sdk@2.x version mismatch)
 const termExtractorAgent = new Agent({
+  id: 'term-extractor',
   name: 'term-extractor',
   model: openai('gpt-4o-mini'),
   instructions: "Tu extrais des termes métier pertinents depuis des titres et descriptions d'appels d'offres publics français. Réponds uniquement en JSON.",
@@ -78,7 +79,7 @@ export const getAODetails = createTool({
       processed_at: z.string().nullable(),
     })),
   }),
-  execute: async ({ context }) => {
+  execute: async ({ source_id }) => {
     const { data } = await supabase
       .from('appels_offres')
       .select(`
@@ -88,13 +89,13 @@ export const getAODetails = createTool({
         keyword_breakdown, semantic_reason, rejet_raison, human_readable_reason,
         rag_sources_detail, decision_gate, llm_skipped, llm_skip_reason
       `)
-      .eq('source_id', context.source_id)
+      .eq('source_id', source_id)
       .single();
 
     const { data: feedbacks } = await supabase
       .from('ao_feedback')
       .select('id, correction_type, correction_value, created_by, processed_at')
-      .eq('source_id', context.source_id)
+      .eq('source_id', source_id)
       .eq('status', 'applied')
       .order('processed_at', { ascending: false })
       .limit(3);
@@ -147,13 +148,13 @@ export const searchSimilarKeywords = createTool({
     has_conflict: z.boolean(),
     conflict_detail: z.string().nullable(),
   }),
-  execute: async ({ context }) => {
+  execute: async ({ term, client_id }) => {
     const { data } = await supabase
       .from('keyword_overrides')
       .select('value, type, reason')
-      .eq('client_id', context.client_id)
+      .eq('client_id', client_id)
       .eq('active', true)
-      .ilike('value', `%${context.term}%`);
+      .ilike('value', `%${term}%`);
 
     const overrides = data ?? [];
 
@@ -199,8 +200,7 @@ export const searchRAGChunks = createTool({
       .default(5)
       .describe('Nombre de chunks à retourner (défaut 5)'),
   }),
-  execute: async ({ context }) => {
-    const { query, filter_type, topK } = context;
+  execute: async ({ query, filter_type, topK }) => {
 
     try {
       const queryVector = await embedQuery(query);
@@ -271,17 +271,17 @@ Pour un faux négatif (direction=include) : options de boost basées sur les key
     })),
     direction: z.enum(['exclude', 'include']),
   }),
-  execute: async ({ context }) => {
+  execute: async ({ source_id, direction }) => {
     const { data } = await supabase
       .from('appels_offres')
       .select('title, description, matched_keywords, keyword_breakdown')
-      .eq('source_id', context.source_id)
+      .eq('source_id', source_id)
       .single();
 
     const choices: Array<{ letter: string; label: string; value: string }> = [];
     const letters = ['A', 'B', 'C'];
 
-    if (context.direction === 'exclude') {
+    if (direction === 'exclude') {
       const keywords: string[] = ((data?.matched_keywords as string[]) ?? []).slice(0, 2);
       keywords.forEach((kw, i) => {
         choices.push({ letter: letters[i], label: `Les AOs liés à "${kw}"`, value: kw });
@@ -311,6 +311,7 @@ Extrais exactement 2 termes métier pertinents (2-4 mots max chacun) qui caract�
     }
   },
 });
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tool 4 — proposeCorrection
@@ -347,29 +348,29 @@ export const proposeCorrection = createTool({
     feedback_id: z.string(),
     proposal_summary: z.string(),
   }),
-  execute: async ({ context }) => {
+  execute: async ({ source_id, client_id, user_reason, correction_type, value, chunk_content, diagnosis_fr, proposal_fr, impact_fr, created_by }) => {
     const { data } = await supabase
       .from('ao_feedback')
       .insert({
-        source_id: context.source_id,
-        client_id: context.client_id,
+        source_id,
+        client_id,
         feedback: 'not_relevant',
-        reason: context.user_reason,
-        correction_type: context.correction_type,
-        correction_value: context.value,
-        chunk_content: context.chunk_content ?? null,
-        agent_diagnosis: context.diagnosis_fr,
-        agent_proposal: context.proposal_fr,
+        reason: user_reason,
+        correction_type,
+        correction_value: value,
+        chunk_content: chunk_content ?? null,
+        agent_diagnosis: diagnosis_fr,
+        agent_proposal: proposal_fr,
         status: 'agent_proposed',
         source: 'chat',
-        created_by: context.created_by ?? null,
+        created_by: created_by ?? null,
       })
       .select()
       .single();
 
     return {
       feedback_id: data?.id ?? '',
-      proposal_summary: `${context.proposal_fr} — ${context.impact_fr}`,
+      proposal_summary: `${proposal_fr} — ${impact_fr}`,
     };
   },
 });
@@ -406,19 +407,19 @@ Le résultat s'affichera sous forme de carte interactive dans l'interface.`,
     summary: z.string(),
     direction: z.enum(['exclude', 'include']),
   }),
-  execute: async ({ context }) => {
+  execute: async ({ term, days_back, direction }) => {
     const since = new Date();
-    since.setDate(since.getDate() - context.days_back);
+    since.setDate(since.getDate() - (days_back ?? 30));
 
     const { data } = await supabase
       .from('appels_offres')
       .select('source_id, title, priority, url_ao, final_score')
       .gte('analyzed_at', since.toISOString())
-      .or(`title.ilike.%${context.term}%,description.ilike.%${context.term}%`);
+      .or(`title.ilike.%${term}%,description.ilike.%${term}%`);
 
     const affected = data ?? [];
 
-    if (context.direction === 'exclude') {
+    if (direction === 'exclude') {
       const correctly_excluded = affected
         .filter(ao => ao.priority === 'LOW' || ao.priority === null)
         .map(ao => ({
@@ -441,7 +442,7 @@ Le résultat s'affichera sous forme de carte interactive dans l'interface.`,
           reason: `AO classé ${ao.priority} — à vérifier avant de confirmer l'exclusion`,
         }));
 
-      const summaryLines: string[] = [`${affected.length} AO(s) affecté(s) sur les ${context.days_back} derniers jours.`];
+      const summaryLines: string[] = [`${affected.length} AO(s) affecté(s) sur les ${days_back} derniers jours.`];
       if (correctly_excluded.length > 0) summaryLines.push(`✅ ${correctly_excluded.length} correctement exclus (déjà LOW).`);
       if (potentially_wrong.length > 0) summaryLines.push(`⚠️ ${potentially_wrong.length} à vérifier (HIGH/MEDIUM) : ${potentially_wrong.map(a => `"${a.title}"`).join(', ')}.`);
 
@@ -476,7 +477,7 @@ Le résultat s'affichera sous forme de carte interactive dans l'interface.`,
           reason: `AO déjà ${ao.priority} — pas d'impact`,
         }));
 
-      const summaryLines: string[] = [`${affected.length} AO(s) concerné(s) sur les ${context.days_back} derniers jours.`];
+      const summaryLines: string[] = [`${affected.length} AO(s) concerné(s) sur les ${days_back} derniers jours.`];
       if (would_promote.length > 0) summaryLines.push(`🔼 ${would_promote.length} AO(s) LOW seraient promus.`);
       if (already_passing.length > 0) summaryLines.push(`✅ ${already_passing.length} déjà HIGH/MEDIUM — pas d'impact.`);
       if (affected.length === 0) summaryLines.push('Aucun AO récent contient ce terme.');
@@ -509,12 +510,12 @@ export const applyCorrection = createTool({
     applied: z.boolean(),
     message: z.string(),
   }),
-  execute: async ({ context }) => {
-    if (!context.approved) {
+  execute: async ({ approved, feedback_id }) => {
+    if (!approved) {
       await supabase
         .from('ao_feedback')
         .update({ status: 'rejected' })
-        .eq('id', context.feedback_id);
+        .eq('id', feedback_id);
 
       return { applied: false, message: 'Correction refusée. Aucun changement effectué.' };
     }
@@ -522,7 +523,7 @@ export const applyCorrection = createTool({
     const { data: feedback } = await supabase
       .from('ao_feedback')
       .select('*')
-      .eq('id', context.feedback_id)
+      .eq('id', feedback_id)
       .single();
 
     if (!feedback) {
@@ -557,7 +558,7 @@ export const applyCorrection = createTool({
     await supabase
       .from('ao_feedback')
       .update({ status: 'applied', processed_at: new Date().toISOString() })
-      .eq('id', context.feedback_id);
+      .eq('id', feedback_id);
 
     return {
       applied: true,
@@ -589,21 +590,21 @@ La règle est désactivée (active=false) mais conservée pour l'audit.`,
       type: z.string(),
     }).nullable(),
   }),
-  execute: async ({ context }) => {
-    if (!context.override_id && !context.value) {
+  execute: async ({ override_id, value, client_id }) => {
+    if (!override_id && !value) {
       return { deactivated: false, message: 'Fournir override_id ou value.', affected_rule: null };
     }
 
     let query = supabase
       .from('keyword_overrides')
       .update({ active: false })
-      .eq('client_id', context.client_id)
+      .eq('client_id', client_id)
       .eq('active', true);
 
-    if (context.override_id) {
-      query = query.eq('id', context.override_id);
+    if (override_id) {
+      query = query.eq('id', override_id);
     } else {
-      query = query.ilike('value', `%${context.value}%`);
+      query = query.ilike('value', `%${value}%`);
     }
 
     const { data, error } = await query.select().single();
@@ -672,8 +673,8 @@ Utilise cet outil quand l'utilisateur questionne un keyword spécifique détect�
     })),
     summary: z.string(),
   }),
-  execute: async ({ context }) => {
-    const normalized = normalizeText(context.keyword);
+  execute: async ({ keyword }) => {
+    const normalized = normalizeText(keyword);
     const matches: Array<{ category_key: string; category_label: string; category_description: string; weight: number; is_red_flag: boolean }> = [];
 
     // Word-boundary match: queried word must appear as a whole word in the lexicon phrase,
@@ -688,7 +689,7 @@ Utilise cet outil quand l'utilisateur questionne un keyword spécifique détect�
     // Search in secteurs
     for (const [key, config] of Object.entries(balthazarLexicon.secteurs)) {
       const found = config.keywords.some(kwMatches);
-      const patternMatch = config.patterns.some(p => p.test(context.keyword));
+      const patternMatch = config.patterns.some(p => p.test(keyword));
       if (found || patternMatch) {
         const meta = CATEGORY_LABELS[key] ?? { label: key, description: '' };
         matches.push({ category_key: key, category_label: meta.label, category_description: meta.description, weight: config.weight, is_red_flag: false });
@@ -698,7 +699,7 @@ Utilise cet outil quand l'utilisateur questionne un keyword spécifique détect�
     // Search in expertises
     for (const [key, config] of Object.entries(balthazarLexicon.expertises)) {
       const found = config.keywords.some(kwMatches);
-      const patternMatch = config.patterns.some(p => p.test(context.keyword));
+      const patternMatch = config.patterns.some(p => p.test(keyword));
       if (found || patternMatch) {
         const meta = CATEGORY_LABELS[key] ?? { label: key, description: '' };
         matches.push({ category_key: key, category_label: meta.label, category_description: meta.description, weight: config.weight, is_red_flag: false });
@@ -707,7 +708,7 @@ Utilise cet outil quand l'utilisateur questionne un keyword spécifique détect�
 
     // Search in posture
     const postureFound = balthazarLexicon.posture.keywords.some(kwMatches);
-    const posturePattern = balthazarLexicon.posture.patterns.some(p => p.test(context.keyword));
+    const posturePattern = balthazarLexicon.posture.patterns.some(p => p.test(keyword));
     if (postureFound || posturePattern) {
       const meta = CATEGORY_LABELS['posture'] ?? { label: 'posture', description: '' };
       matches.push({ category_key: 'posture', category_label: meta.label, category_description: meta.description, weight: balthazarLexicon.posture.weight, is_red_flag: false });
@@ -715,7 +716,7 @@ Utilise cet outil quand l'utilisateur questionne un keyword spécifique détect�
 
     // Search in red_flags
     const rfFound = balthazarLexicon.red_flags.keywords.some(kwMatches);
-    const rfPattern = balthazarLexicon.red_flags.patterns.some(p => p.test(context.keyword));
+    const rfPattern = balthazarLexicon.red_flags.patterns.some(p => p.test(keyword));
     if (rfFound || rfPattern) {
       const meta = CATEGORY_LABELS['red_flags'] ?? { label: 'red_flags', description: '' };
       matches.push({ category_key: 'red_flags', category_label: meta.label, category_description: meta.description, weight: 0, is_red_flag: true });
@@ -725,17 +726,17 @@ Utilise cet outil quand l'utilisateur questionne un keyword spécifique détect�
     const redFlagMatch = matches.find(m => m.is_red_flag);
     let summary: string;
     if (matches.length === 0) {
-      summary = `"${context.keyword}" n'est pas dans le lexique Balthazar. Il a peut-être matché via un pattern regex ou c'est un faux positif à investiguer.`;
+      summary = `"${keyword}" n'est pas dans le lexique Balthazar. Il a peut-être matché via un pattern regex ou c'est un faux positif à investiguer.`;
     } else if (redFlagMatch && positiveMatches.length === 0) {
-      summary = `"${context.keyword}" est un red flag : ${redFlagMatch.category_description} Il signale que l'AO est probablement hors périmètre Balthazar.`;
+      summary = `"${keyword}" est un red flag : ${redFlagMatch.category_description} Il signale que l'AO est probablement hors périmètre Balthazar.`;
     } else if (redFlagMatch && positiveMatches.length > 0) {
       const posLine = positiveMatches.map(m => `${m.category_label} (weight: ${m.weight})`).join(', ');
-      summary = `"${context.keyword}" est classé dans ${posLine}. Cependant, il est aussi signalé comme red flag potentiel dans certains contextes : ${redFlagMatch.category_description}`;
+      summary = `"${keyword}" est classé dans ${posLine}. Cependant, il est aussi signalé comme red flag potentiel dans certains contextes : ${redFlagMatch.category_description}`;
     } else {
-      summary = positiveMatches.map(m => `"${context.keyword}" → ${m.category_label} (weight: ${m.weight}). ${m.category_description}`).join('\n');
+      summary = positiveMatches.map(m => `"${keyword}" → ${m.category_label} (weight: ${m.weight}). ${m.category_description}`).join('\n');
     }
 
-    return { found: matches.length > 0, keyword: context.keyword, matches, summary };
+    return { found: matches.length > 0, keyword: keyword, matches, summary };
   },
 });
 
@@ -759,16 +760,16 @@ ou quand tu suspectes qu'une règle précédente cause des effets de bord.`,
     total: z.number(),
     summary: z.string(),
   }),
-  execute: async ({ context }) => {
+  execute: async ({ client_id, type }) => {
     let query = supabase
       .from('keyword_overrides')
       .select('id, type, value, reason, created_at')
-      .eq('client_id', context.client_id)
+      .eq('client_id', client_id)
       .eq('active', true)
       .order('created_at', { ascending: false });
 
-    if (context.type !== 'all') {
-      query = query.eq('type', context.type);
+    if (type !== 'all') {
+      query = query.eq('type', type);
     }
 
     const { data } = await query;
@@ -819,14 +820,14 @@ Ne demande PAS de confirmation à l'utilisateur — c'est le superviseur qui gè
     correction_type: z.enum(['keyword_red_flag', 'rag_chunk', 'keyword_boost']),
     correction_value: z.string(),
   }),
-  execute: async ({ context }) => {
+  execute: async ({ source_id, client_id, ao_context, user_reason, q1_scope, q2_valid_case, q3_confirmed_rule, direction, created_by }) => {
     // Step 1 — Check for duplicate rules
     const { data: existingOverrides } = await supabase
       .from('keyword_overrides')
       .select('value, type, reason')
-      .eq('client_id', context.client_id)
+      .eq('client_id', client_id)
       .eq('active', true)
-      .ilike('value', `%${context.q3_confirmed_rule.substring(0, 20)}%`);
+      .ilike('value', `%${q3_confirmed_rule.substring(0, 20)}%`);
 
     const similarRulesContext = existingOverrides?.length
       ? `Règles similaires déjà actives : ${existingOverrides.map(o => `"${o.value}" (${o.type})`).join(', ')}`
@@ -834,36 +835,36 @@ Ne demande PAS de confirmation à l'utilisateur — c'est le superviseur qui gè
 
     // Step 2 — Tuning agent: structured diagnosis
     const diagnosisPrompt = `Contexte AO :
-${context.ao_context}
+${ao_context}
 
-Message utilisateur : ${context.user_reason}
+Message utilisateur : ${user_reason}
 
-Direction de la correction : ${context.direction === 'include' ? 'INCLUSION (faux négatif — AO pertinent sous-scoré)' : 'EXCLUSION (faux positif — AO non pertinent retenu)'}
+Direction de la correction : ${direction === 'include' ? 'INCLUSION (faux négatif — AO pertinent sous-scoré)' : 'EXCLUSION (faux positif — AO non pertinent retenu)'}
 
 Réponses aux questions de clarification :
-Q1 (portée) : ${context.q1_scope}
-Q2 (impact confirmé) : ${context.q2_valid_case}
-Q3 (reformulation confirmée) : ${context.q3_confirmed_rule}
+Q1 (portée) : ${q1_scope}
+Q2 (impact confirmé) : ${q2_valid_case}
+Q3 (reformulation confirmée) : ${q3_confirmed_rule}
 
 ${similarRulesContext}
 
 Propose une correction unique et ciblée. Pour direction=include, utilise correction_type=keyword_boost.`;
 
     const diagnosisResult = await aoFeedbackTuningAgent.generate(diagnosisPrompt, {
-      output: feedbackProposalSchema,
+      structuredOutput: { schema: feedbackProposalSchema },
     });
 
     const proposal = diagnosisResult.object;
 
     // Enforce direction → correction_type mapping — tuning agent can hallucinate the wrong type
-    if (context.direction === 'include') {
+    if (direction === 'include') {
       proposal.correction_type = 'keyword_boost';
     }
 
     // Step 3 — Determine the term to simulate (direction-aware to avoid exclusion term winning)
-    const term = context.direction === 'include'
-      ? (proposal.technical_payload.keyword_to_boost ?? context.q3_confirmed_rule)
-      : (proposal.technical_payload.red_flag_to_add ?? proposal.technical_payload.chunk_title ?? context.q3_confirmed_rule);
+    const term = direction === 'include'
+      ? (proposal.technical_payload.keyword_to_boost ?? q3_confirmed_rule)
+      : (proposal.technical_payload.red_flag_to_add ?? proposal.technical_payload.chunk_title ?? q3_confirmed_rule);
 
     // Step 4 — Simulate impact
     const since = new Date();
@@ -878,7 +879,7 @@ Propose une correction unique et ciblée. Pour direction=include, utilise correc
     const affected = affectedAOs ?? [];
     let simulationSummary: string;
 
-    if (context.direction === 'include') {
+    if (direction === 'include') {
       const wouldPromote = affected.filter(ao => ao.priority === 'LOW' || ao.priority === null);
       const alreadyPassing = affected.filter(ao => ao.priority === 'HIGH' || ao.priority === 'MEDIUM');
       const simulationLines: string[] = [`${affected.length} AO(s) concerné(s) sur les 30 derniers jours.`];
@@ -898,10 +899,10 @@ Propose une correction unique et ciblée. Pour direction=include, utilise correc
     const { data: feedbackRow } = await supabase
       .from('ao_feedback')
       .insert({
-        source_id: context.source_id,
-        client_id: context.client_id,
-        feedback: context.direction === 'include' ? 'relevant' : 'not_relevant',
-        reason: context.user_reason,
+        source_id,
+        client_id,
+        feedback: direction === 'include' ? 'relevant' : 'not_relevant',
+        reason: user_reason,
         correction_type: proposal.correction_type,
         correction_value: term,
         chunk_content: proposal.technical_payload.chunk_content ?? null,
@@ -909,7 +910,7 @@ Propose une correction unique et ciblée. Pour direction=include, utilise correc
         agent_proposal: proposal.proposal_fr,
         status: 'agent_proposed',
         source: 'chat',
-        created_by: context.created_by ?? null,
+        created_by: created_by ?? null,
       })
       .select()
       .single();
@@ -953,36 +954,36 @@ Retourne un résultat pour confirmation UI — ne pas appliquer immédiatement.`
     current_priority: z.string().nullable(),
     new_priority: z.string(),
   }),
-  execute: async ({ context }) => {
+  execute: async ({ source_id, client_id, new_priority, reason, created_by }) => {
     const { data: ao } = await supabase
       .from('appels_offres')
       .select('title, priority')
-      .eq('source_id', context.source_id)
+      .eq('source_id', source_id)
       .single();
 
     const { data: feedbackRow } = await supabase
       .from('ao_feedback')
       .insert({
-        source_id: context.source_id,
-        client_id: context.client_id,
-        feedback: context.new_priority === 'HIGH' ? 'relevant' : 'not_relevant',
-        reason: context.reason,
+        source_id,
+        client_id,
+        feedback: new_priority === 'HIGH' ? 'relevant' : 'not_relevant',
+        reason,
         correction_type: 'manual_override',
-        correction_value: context.new_priority,
-        agent_diagnosis: `Changement de priorité manuel : ${ao?.priority ?? '?'} → ${context.new_priority}`,
-        agent_proposal: `Priorité de l'AO "${ao?.title ?? context.source_id}" changée en ${context.new_priority}`,
+        correction_value: new_priority,
+        agent_diagnosis: `Changement de priorité manuel : ${ao?.priority ?? '?'} → ${new_priority}`,
+        agent_proposal: `Priorité de l'AO "${ao?.title ?? source_id}" changée en ${new_priority}`,
         status: 'agent_proposed',
         source: 'chat',
-        created_by: context.created_by,
+        created_by,
       })
       .select()
       .single();
 
     return {
       feedback_id: feedbackRow?.id ?? '',
-      ao_title: ao?.title ?? context.source_id,
+      ao_title: ao?.title ?? source_id,
       current_priority: ao?.priority ?? null,
-      new_priority: context.new_priority,
+      new_priority,
     };
   },
 });
@@ -1008,8 +1009,8 @@ NE PAS appeler si une session de correction est déjà en cours.`,
     source_id: z.string(),
     current_priority: z.enum(['HIGH', 'MEDIUM', 'LOW']).nullable(),
   }),
-  execute: async ({ context }) => ({
-    source_id: context.source_id,
-    current_priority: context.current_priority,
+  execute: async ({ source_id, current_priority }) => ({
+    source_id,
+    current_priority,
   }),
 });

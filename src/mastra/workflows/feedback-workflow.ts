@@ -130,7 +130,7 @@ ${feedback.reason ?? '(aucune raison fournie)'}
 Diagnostique la cause du faux positif et propose une correction ciblée.`;
 
     const result = await aoFeedbackTuningAgent.generate(prompt, {
-      output: feedbackProposalSchema,
+      structuredOutput: { schema: feedbackProposalSchema },
     });
 
     const proposal = result.object as z.infer<typeof feedbackProposalSchema>;

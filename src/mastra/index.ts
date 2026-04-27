@@ -42,6 +42,7 @@ import {
  */
 export const mastra = new Mastra({
   storage: new PostgresStore({
+    id: 'mastra-pg-store',
     connectionString: process.env.SUPABASE_DIRECT_URL!,
   }),
   agents: {
@@ -76,17 +77,17 @@ export const mastra = new Mastra({
       {
         path: '/api/feedback',
         method: 'GET',
-        createHandler: async () => async (req: Request) => handleFeedbackForm(req),
+        createHandler: async () => async (c: { req: { raw: Request } }) => handleFeedbackForm(c.req.raw),
       },
       {
         path: '/api/feedback/submit',
         method: 'POST',
-        createHandler: async () => async (req: Request) => handleFeedbackSubmit(req),
+        createHandler: async () => async (c: { req: { raw: Request } }) => handleFeedbackSubmit(c.req.raw),
       },
       {
         path: '/api/feedback/confirm',
         method: 'GET',
-        createHandler: async ({ mastra }) => async (req: Request) => handleFeedbackConfirm(req, mastra),
+        createHandler: async ({ mastra }) => async (c: { req: { raw: Request } }) => handleFeedbackConfirm(c.req.raw, mastra),
       },
     ],
     cors: {

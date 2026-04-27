@@ -6,7 +6,7 @@
  * and returns a typed FeedbackProposal. Does NOT manage conversation.
  */
 
-import { Agent } from '@mastra/core';
+import { Agent } from '@mastra/core/agent';
 import { z } from 'zod';
 import { openai as openaiProvider } from '@ai-sdk/openai';
 
@@ -39,6 +39,7 @@ export type FeedbackProposal = z.infer<typeof feedbackProposalSchema>;
 // ──────────────────────────────────────────────────
 
 export const aoFeedbackTuningAgent = new Agent({
+  id: 'ao-feedback-tuning',
   name: 'ao-feedback-tuning',
   model: openaiProvider.chat('gpt-4o'),
   instructions: `Tu es un expert en qualification d'appels d'offres pour Balthazar Consulting.

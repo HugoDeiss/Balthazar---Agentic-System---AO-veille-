@@ -1,5 +1,5 @@
 // src/mastra/tools/marchesonline-rss-fetcher.ts
-import { createTool } from '@mastra/core';
+import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import Parser from 'rss-parser';
 import { extractUUIDFromMarchesOnline, extractSIRET } from '../../utils/cross-platform-dedup';

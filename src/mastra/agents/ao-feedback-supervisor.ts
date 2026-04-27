@@ -30,11 +30,12 @@ import {
 
 const memory = new Memory({
   storage: new PostgresStore({
+    id: 'mastra-memory-pg-store',
     connectionString: process.env.SUPABASE_DIRECT_URL!,
   }),
   options: {
     lastMessages: 15,
-    threads: { generateTitle: false },
+    generateTitle: false,
     workingMemory: {
       enabled: true,
       scope: 'resource',
@@ -58,12 +59,13 @@ const memory = new Memory({
 });
 
 export const aoFeedbackSupervisor = new Agent({
+  id: 'ao-feedback-supervisor',
   name: 'ao-feedback-supervisor',
   model: openai('gpt-4o-mini'),
   memory,
   tools: { getAODetails, searchRAGChunks, listActiveOverrides, getKeywordCategory, executeCorrection, deactivateOverride, proposeChoices, simulateImpact, manualOverride, proposePriorityChoice },
-  defaultStreamOptions: { maxSteps: 20 },
-  defaultGenerateOptions: { maxSteps: 20 },
+  defaultStreamOptionsLegacy: { maxSteps: 20 },
+  defaultGenerateOptionsLegacy: { maxSteps: 20 },
   instructions: `Tu es le point d'entrée du système de feedback AO de Balthazar Consulting.
 
 ## Initialisation (message __init__ ou première ouverture)

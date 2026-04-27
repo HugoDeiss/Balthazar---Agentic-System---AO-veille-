@@ -26,11 +26,11 @@ import {
 } from '../tools/feedback-tools';
 
 export const aoFeedbackAgent = new Agent({
+  id: 'ao-feedback-agent',
   name: 'ao-feedback-agent',
-  // Chat Completions API — évite l'API Responses (openai('…')) qui peut renvoyer un stream vide avec les outils sous Mastra 0.24.x.
   model: openai.chat('gpt-4o'),
-  defaultGenerateOptions: { maxSteps: 20 },
-  defaultStreamOptions: { maxSteps: 20 },
+  defaultGenerateOptionsLegacy: { maxSteps: 20 },
+  defaultStreamOptionsLegacy: { maxSteps: 20 },
   instructions: `Tu es l'agent de feedback du système de veille appels d'offres de Balthazar.
 Ton rôle est d'aider l'équipe à améliorer la qualité de l'analyse quotidienne des AO.
 Tu fonctionnes comme un consultant qui reçoit un brief flou et qui clarifie avant d'exécuter.

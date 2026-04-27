@@ -19,11 +19,12 @@ import {
 } from '../tools/feedback-tools';
 
 export const aoCorrectionAgent = new Agent({
+  id: 'ao-correction-agent',
   name: 'ao-correction-agent',
   model: openai('gpt-4o-mini'),
   agents: { aoFeedbackTuningAgent },
-  defaultStreamOptions: { maxSteps: 15 },
-  defaultGenerateOptions: { maxSteps: 15 },
+  defaultStreamOptionsLegacy: { maxSteps: 15 },
+  defaultGenerateOptionsLegacy: { maxSteps: 15 },
   tools: {
     simulateImpact,
     searchSimilarKeywords,
