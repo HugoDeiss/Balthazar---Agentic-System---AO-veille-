@@ -2,7 +2,10 @@ import { Inngest } from 'inngest';
 import { serve } from 'inngest/hono';
 import type { Mastra } from '@mastra/core/mastra';
 
-export const inngest = new Inngest({ id: 'balthazar-ao-veille' });
+export const inngest = new Inngest({
+  id: 'balthazar-ao-veille',
+  signingKey: process.env.INNGEST_SIGNING_KEY,
+});
 
 /**
  * Scheduled Inngest function — replaces the GitHub Actions cron.
@@ -79,5 +82,5 @@ export function createInngestHandler(mastra: Mastra) {
     createAoVeilleFunction(mastra),
     createFeedbackProcessorFunction(mastra),
   ];
-  return serve({ client: inngest, functions });
+  return serve({ client: inngest, functions, signingKey: process.env.INNGEST_SIGNING_KEY });
 }
