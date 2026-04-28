@@ -9,7 +9,7 @@ Vue d'ensemble du système à deux repos et de leurs connexions.
 ```
 balthazar-veille-app/          (Next.js — Interface utilisateur)
     └── lit Supabase directement
-    └── appelle Mastra Cloud via HTTP
+    └── appelle Mastra Platform via HTTP
 
 Balthazar---Agentic-System---AO-veille-/   (Mastra — Backend IA)
     └── pipeline veille quotidienne (Inngest cron)
@@ -25,7 +25,7 @@ Les deux repos partagent la **même base Supabase** (table `appels_offres`).
 
 ```
                      ┌─────────────────────────────┐
-                     │   Mastra Cloud               │
+                     │   Mastra Platform               │
                      │                              │
   Inngest cron ─────>│  aoVeilleWorkflow            │
   (6h UTC lun-ven)   │  ├─ BOAMP fetch              │
@@ -134,7 +134,7 @@ SUPABASE_SERVICE_KEY=    # Supabase write
 SUPABASE_PUBLISHABLE_KEY=
 RESEND_API_KEY=          # emails confirmation feedback
 FEEDBACK_SECRET=         # clé HMAC 32 chars (partagée avec Next.js)
-MASTRA_URL=              # https://balthazar-tender-monitoring.mastra.cloud
+MASTRA_URL=              # https://balthazar-tender-monitoring.server.mastra.cloud
 ```
 
 ### Repo Next.js (`balthazar-veille-app`)
@@ -144,7 +144,7 @@ NEXT_PUBLIC_SUPABASE_URL=        # même projet Supabase
 NEXT_PUBLIC_SUPABASE_ANON_KEY=   # lecture publique (ou PUBLISHABLE_DEFAULT_KEY)
 SUPABASE_SERVICE_KEY=            # lecture côté serveur (bypass RLS)
 OPENAI_API_KEY=                  # (non utilisé directement — passage par Mastra)
-MASTRA_URL=                      # même URL Mastra Cloud
+MASTRA_URL=                      # même URL Mastra Platform
 FEEDBACK_SECRET=                 # même clé HMAC que le backend
 ```
 
@@ -241,7 +241,7 @@ lib/
 
 | Composant | Plateforme | URL |
 |-----------|-----------|-----|
-| Backend Mastra | Mastra Cloud | `https://balthazar-tender-monitoring.mastra.cloud` |
+| Backend Mastra | Mastra Platform | `https://balthazar-tender-monitoring.server.mastra.cloud` |
 | Frontend Next.js | Vercel (ou local) | Variable |
 | Base de données | Supabase | Projet partagé |
 | Cron | Inngest | Dashboard Inngest → ao-veille-daily |

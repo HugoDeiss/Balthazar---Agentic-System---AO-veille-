@@ -445,7 +445,7 @@ RESEND_API_KEY=re_...
 
 # Feedback (doit être identique dans balthazar-veille-app)
 FEEDBACK_SECRET=<clé 32 chars>
-MASTRA_URL=https://balthazar-tender-monitoring.mastra.cloud
+MASTRA_URL=https://balthazar-tender-monitoring.server.mastra.cloud
 ```
 
 ### Initialiser la Base de Données

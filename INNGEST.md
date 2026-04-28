@@ -24,7 +24,7 @@ Après déploiement sur Mastra Cloud, l’URL à enregistrer dans Inngest (sync 
 https://<votre-domaine-mastra-cloud>/api/inngest
 ```
 
-Exemple : `https://balthazar-tender-monitoring.mastra.cloud/api/inngest`
+Exemple : `https://balthazar-tender-monitoring.server.mastra.cloud/api/inngest`
 
 Un `GET` sur cette URL doit répondre **200** avec un JSON de métadonnées Inngest (dont `function_count`) lorsque le déploiement est à jour.
 
