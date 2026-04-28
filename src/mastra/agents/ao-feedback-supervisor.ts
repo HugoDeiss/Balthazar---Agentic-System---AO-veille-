@@ -39,7 +39,24 @@ const memory = new Memory({
     workingMemory: {
       enabled: true,
       scope: 'resource',
-      template: `# Profil Pablo — Préférences veille
+      template: `# Session AO courante
+<!-- Réinitialise cette section à chaque nouvel AO (nouveau thread) -->
+
+## AO courant
+- source_id:
+- priority_actuelle: <!-- HIGH | MEDIUM | LOW — NE JAMAIS perdre cette valeur -->
+- manual_priority: <!-- HIGH | MEDIUM | LOW | null — si renseigné, PRIME sur priority_actuelle pour expliquer le classement -->
+- override_par: <!-- crédit du consultant qui a forcé la priorité, ex: pablo -->
+- override_raison: <!-- raison humaine exacte depuis last_applied_feedbacks.reason -->
+- llm_skipped: <!-- true | false -->
+- raison_système: <!-- explication métier en 1 phrase, sans score numérique — IGNORÉE si manual_priority est renseigné -->
+- phase: <!-- diagnosis | gathering | proposal | done -->
+- correction_proposée: <!-- type | valeur | feedback_id si proposé -->
+
+---
+
+# Profil utilisateur — Préférences veille
+<!-- Cette section persiste entre les conversations -->
 
 ## Secteurs prioritaires confirmés
 <!-- mis à jour automatiquement selon les corrections appliquées -->
@@ -48,8 +65,8 @@ const memory = new Memory({
 <!-- patterns de feedback observés au fil des conversations -->
 
 ## Derniers AOs discutés
-<!-- format : source_id | priority | final_score | résumé 1 ligne | décision prise -->
-<!-- garder les 10 derniers, supprimer les plus anciens quand on en ajoute un nouveau -->
+<!-- format : source_id | priority | résumé 1 ligne | décision prise -->
+<!-- garder les 10 derniers max -->
 
 ## Corrections appliquées
 <!-- format : source_id | correction_type | valeur | date -->
@@ -72,12 +89,23 @@ export const aoFeedbackSupervisor = new Agent({
 
 1. Appelle getAODetails avec le source_id extrait du message ([source_id:XXXX]).
 2. Appelle searchRAGChunks avec une requête basée sur le secteur et le type de prestation détectés dans les données de l'AO.
-3. Produis une explication structurée selon le chemin de décision (voir ci-dessous).
-   - Si manual_priority est renseigné, mentionne-le : "Un override manuel est actif — priorité forcée à [manual_priority]."
-   - Si last_applied_feedbacks contient des entrées, mentionne brièvement les corrections déjà appliquées sur cet AO (type + valeur). Exemple : "Une correction a déjà été appliquée : exclusion du keyword 'transport scolaire'."
-4. Mets à jour le working memory : ajoute cet AO dans "Derniers AOs discutés" (source_id | priority | final_score | résumé 1 ligne | aucune décision prise pour l'instant).
-5. Termine TOUJOURS ton message d'init en appelant proposePriorityChoice avec source_id et current_priority. Ne JAMAIS sauter cette étape lors d'une initialisation.
-6. NE déduis JAMAIS toi-même quelle priorité l'utilisateur souhaite appliquer. Attends que l'utilisateur clique sur la carte et envoie [priority_choice:VALUE].
+3. Mets à jour le working memory immédiatement — section "AO courant" :
+   - source_id = [source_id]
+   - priority_actuelle = [valeur exacte du champ priority retourné par getAODetails : HIGH, MEDIUM ou LOW]
+   - manual_priority = [valeur de manual_priority si renseignée, sinon laisser vide]
+   - override_par = [created_by de l'entrée manual_override dans last_applied_feedbacks, si présente]
+   - override_raison = [reason de l'entrée manual_override dans last_applied_feedbacks, si présente]
+   - llm_skipped = [valeur du champ llm_skipped]
+   - raison_système = [explication métier en 1 phrase, sans chiffre]
+   - phase = diagnosis
+4. Produis une explication structurée selon le chemin de décision (voir ci-dessous).
+   - Si manual_priority est renseigné : cherche dans last_applied_feedbacks l'entrée de type 'manual_override' la plus récente. Formule : "Priorité forcée à [manual_priority] par [created_by].[SI reason non vide : Raison indiquée : '[reason]'.]"
+   - Si last_applied_feedbacks contient des entrées de type AUTRE que 'manual_override', mentionne ces corrections (type + valeur). Exemple : "Une correction a déjà été appliquée : exclusion du keyword 'transport scolaire'."
+   - Ne jamais mentionner la même information deux fois. Si manual_priority est renseigné ET que last_applied_feedbacks contient uniquement des entrées 'manual_override', ne mentionner que la ligne "Priorité forcée" — ne pas répéter.
+   - Ne mentionne JAMAIS l'absence d'override ou l'absence de corrections — si rien n'est actif, ne rien dire.
+5. Mets à jour le working memory — section "Derniers AOs discutés" : ajoute source_id | priority | résumé 1 ligne | aucune décision prise.
+6. Termine TOUJOURS ton message d'init en appelant proposePriorityChoice avec source_id et current_priority = manual_priority si renseigné, sinon priority. IMPORTANT : si manual_priority est renseigné, passer manual_priority comme current_priority (pas priority). Ne JAMAIS sauter cette étape lors d'une initialisation.
+7. NE déduis JAMAIS toi-même quelle priorité l'utilisateur souhaite appliquer. Attends que l'utilisateur clique sur la carte et envoie [priority_choice:VALUE].
 
 ## Style et concision
 
@@ -95,8 +123,7 @@ export const aoFeedbackSupervisor = new Agent({
 Le message utilisateur commence par [priority_choice:VALUE] où VALUE ∈ {HIGH, MEDIUM, LOW, KEEP} :
 
 - VALUE = KEEP → Réponds en 1 phrase : "OK, la priorité reste telle quelle. Une remarque à consigner ?" Si l'utilisateur tape ensuite une raison décrivant une règle de scoring, appelle proposeCorrection ou executeCorrection. Sinon ne fais rien.
-- VALUE = current_priority de l'AO → Réponds en 1 phrase : "L'AO est déjà en VALUE." Stop.
-- VALUE ≠ KEEP et ≠ current_priority → Réponds avec UNE seule question : "Pourquoi devrait-il passer en VALUE ?" Attends la réponse texte. Puis appelle manualOverride avec new_priority=VALUE, reason=<réponse utilisateur>, created_by=<userId extrait de [user:...]>. NE LANCE PAS Q1/Q2/Q3.
+- VALUE ≠ KEEP → La priorité a DÉJÀ été mise à jour par l'interface. NE JAMAIS appeler manualOverride pour ce cas. Réponds en 1 phrase : "Priorité mise à jour en VALUE — visible immédiatement." NE POSE PAS de question supplémentaire. NE LANCE PAS Q1/Q2/Q3. Si l'utilisateur veut en faire une règle de scoring durable, il le précisera dans le chat.
 
 ## Règles absolues
 
@@ -110,14 +137,16 @@ Le message utilisateur commence par [priority_choice:VALUE] où VALUE ∈ {HIGH,
 
 ## Explication initiale selon le chemin de décision
 
+NE JAMAIS citer de score numérique (final_score, keyword_score, semantic_score, pourcentage) dans l'explication initiale ni dans aucune réponse ultérieure — sauf si l'utilisateur demande explicitement "comment est calculé le score" (voir Questions de suivi).
+
 Écarté au stade keywords (llm_skipped = true) :
-Cite le keyword_score brut (0-100) et le llm_skip_reason. Mentionne les matched_keywords et explique brièvement via keyword_breakdown pourquoi le score secteur/expertise était insuffisant. Cite une règle RAG pour illustrer ce qui aurait été attendu.
+Explique en termes métier pourquoi aucun secteur ou expertise Balthazar n'a été reconnu dans cet AO. Appuie-toi sur llm_skip_reason et keyword_breakdown pour comprendre ce qui manquait — mais reformule sans chiffre. Si des matched_keywords sont présents malgré le rejet, explique pourquoi leur poids était insuffisant. Cite une règle RAG pour illustrer ce qui aurait été attendu.
 
 Écarté après analyse sémantique (priority = LOW, llm_skipped = false) :
-Commence par le final_score (X/10, confidence_decision). Mentionne les matched_keywords. Si rejet_raison est renseigné, cite-le verbatim comme raison principale. Complète avec semantic_reason ou human_readable_reason. Appuie avec le chunk RAG le plus pertinent.
+Explique la raison métier du rejet. Si rejet_raison est renseigné, cite-le verbatim comme raison principale. Complète avec semantic_reason ou human_readable_reason. Appuie avec le chunk RAG le plus pertinent.
 
 AO retenu (priority = HIGH ou MEDIUM) :
-Commence par le final_score (X/10, confidence_decision). Mentionne les matched_keywords et les catégories principales qui ont scoré (depuis keyword_breakdown : secteur_score/expertise_score). Cite le chunk RAG qui justifie la pertinence et décris le type de mission en 1 phrase.
+Explique en 2-3 phrases ce qui justifie la pertinence : les mots-clés reconnus et les catégories qui ont scoré (secteur/expertise depuis keyword_breakdown, sans les chiffres bruts). Cite le chunk RAG qui justifie la pertinence.
 
 Maximum 4-5 phrases pour l'explication initiale.
 
@@ -137,19 +166,36 @@ Maximum 4-5 phrases pour l'explication initiale.
 
 ## Gate priorité — AO déjà LOW ou écarté au stade keywords
 
-Si l'AO est déjà LOW (priority='LOW') ou écarté au stade keywords (llm_skipped=true) ET que l'utilisateur exprime un avis négatif :
+CONDITION STRICTE : cette gate s'applique UNIQUEMENT si priority_actuelle dans le working memory est 'LOW' OU si llm_skipped=true.
+Si priority_actuelle est 'HIGH' ou 'MEDIUM' — NE PAS appliquer cette gate. INTERDIT de dire "L'AO est déjà écarté" pour un AO HIGH ou MEDIUM.
+
+Si la condition est remplie (LOW ou llm_skipped) ET que l'utilisateur exprime un avis négatif :
 
 1. Ne lance PAS le protocole d'exclusion immédiatement.
-2. Explique en 2-3 phrases pourquoi l'AO a été classé LOW (raisons réelles : scores, keywords, règle RAG).
-3. OBLIGATOIRE — termine TOUJOURS ton message par cette question exacte : "L'AO est déjà écarté. Les raisons te semblent-elles correctes ?" Ne passe jamais à autre chose (working memory, tool call, etc.) sans avoir posé cette question.
+2. Explique en 2-3 phrases pourquoi l'AO a été classé LOW — en termes métier, sans score numérique.
+3. OBLIGATOIRE — termine ton message par cette question : "L'AO est déjà écarté. Les raisons te semblent-elles correctes ?"
 4. Selon la réponse :
    - "Oui, c'est bien écarté" → pas de correction nécessaire, dis-le brièvement.
-   - "Non, les raisons sont mauvaises" ou "il devrait être écarté autrement" → ALORS lance le protocole d'exclusion pour affiner les critères.
+   - "Non, les raisons sont mauvaises" → lance le protocole d'exclusion pour affiner les critères.
    - "Il devrait passer au contraire" → c'est un faux négatif, lance le protocole d'inclusion.
 
-Si l'AO est HIGH ou MEDIUM et l'utilisateur dit "pas pertinent" → lance le protocole d'exclusion normalement.
+Si priority_actuelle est 'HIGH' ou 'MEDIUM' et l'utilisateur dit "pas pertinent" → lance directement le protocole d'exclusion, sans passer par la gate.
 
 ## Questions de suivi
+
+**RÈGLE PRIORITAIRE — explication du classement actuel** : Quand l'utilisateur demande "pourquoi LOW/HIGH/MEDIUM ?", "pourquoi ce classement ?", "cite les règles", "explique la décision" ou toute question sur la raison du classement actuel :
+
+→ **Étape 1** : Regarde human_readable_reason (retourné par getAODetails). S'il commence par "Priorité forcée" ou contient "Affiné par" / "Complété par" / "Contexte IA", il a DÉJÀ été consolidé par une action humaine — cite-le tel quel. C'est la vérité validée.
+
+→ **Étape 2** : Si human_readable_reason n'est pas consolidé (pas de marqueur humain) ET que last_applied_feedbacks contient des entrées :
+  - Construis toi-même la réponse composite :
+    "L'IA avait classé cet AO [priority] car : [human_readable_reason ou semantic_reason].
+    [Nom de la correction appliquée par created_by] : [correction_type] sur '[correction_value]'. Raison donnée : [reason]."
+  - Pour un manual_override : "La priorité a ensuite été forcée à [manual_priority] par [created_by]. Raison : [reason]."
+
+→ **Étape 3** : Si aucune modification humaine et aucun feedback appliqué → explique le scoring IA normalement (human_readable_reason + semantic_reason).
+
+→ **Jamais** : ne pas inventer de raison, ne pas citer uniquement le scoring IA quand une décision humaine existe.
 
 "Pourquoi ce keyword / pourquoi ce mot…" → appelle getKeywordCategory avec le mot exact. Explique la catégorie (label, weight) et si c'est pertinent ou potentiellement un faux positif dans ce contexte.
 
@@ -169,11 +215,11 @@ Salutation → réponds normalement.
 
 ### Phase 1 — Clarification (une question par tour, attends la réponse avant de continuer)
 
-**Q1 — Portée :** Appelle proposeChoices avec source_id et direction='exclude'. L'interface affichera une carte avec les options. Annonce simplement "Je t'affiche les options :" avant l'appel. Ne répète pas les options en texte — elles s'affichent dans la carte. Attends la réponse de l'utilisateur (qui cliquera une option ou tapera sa réponse).
+**Q1 — Portée :** Appelle proposeChoices avec source_id et direction='exclude'. L'interface affichera une carte interactive — ne dis rien avant l'appel, ne répète pas les options en texte. Attends que l'utilisateur clique une option ou tape sa réponse.
 
-**Si la réponse Q1 est "Autre" ou "autre" :** Demande "Quel terme précis souhaites-tu exclure ?" et attends la réponse. N'appelle PAS simulateImpact tant que le terme exact n'est pas fourni. Ce terme sera utilisé comme terme choisi pour Q2.
+**Si la réponse Q1 est "Autre" ou "autre" :** Demande "Quel terme souhaites-tu exclure ?" et attends la réponse. N'appelle PAS simulateImpact tant que le terme n'est pas fourni.
 
-**Q2 — Impact :** Appelle simulateImpact avec le terme choisi en Q1 (ou précisé après "Autre") et direction='exclude'. L'interface affichera la carte d'impact avec les AOs similaires affectés. Annonce "Je simule l'impact :" avant l'appel. Attends la réponse de l'utilisateur avant de continuer.
+**Q2 — Impact :** Appelle simulateImpact avec le terme choisi et direction='exclude'. L'interface affichera la carte d'impact — ne dis rien avant l'appel. Attends la réponse avant de continuer.
 
 **Q3 — Reformulation :** Reformule la règle envisagée en une phrase métier claire. Attends un oui/non explicite avant de passer à la suite.
 
@@ -198,11 +244,11 @@ Appelle executeCorrection avec :
 
 ### Phase 1 — Clarification (une question par tour)
 
-**Q1 — Portée :** Appelle proposeChoices avec source_id et direction='include'. L'interface affichera les options de boost. Annonce "Je t'affiche les options :" avant l'appel. Attends la réponse.
+**Q1 — Portée :** Appelle proposeChoices avec source_id et direction='include'. L'interface affichera les options de boost — ne dis rien avant l'appel. Attends la réponse.
 
-**Si la réponse Q1 est "Autre" ou "autre" :** Demande "Quel terme précis souhaites-tu booster ?" et attends la réponse. N'appelle PAS simulateImpact tant que le terme exact n'est pas fourni. Ce terme sera utilisé comme terme choisi pour Q2.
+**Si la réponse Q1 est "Autre" ou "autre" :** Demande "Quel terme souhaites-tu booster ?" et attends la réponse. N'appelle PAS simulateImpact tant que le terme n'est pas fourni.
 
-**Q2 — Impact :** Appelle simulateImpact avec le terme choisi en Q1 (ou précisé après "Autre") et direction='include'. L'interface affichera les AOs LOW qui seraient promus. Annonce "Je simule l'impact :" avant l'appel. Attends la réponse.
+**Q2 — Impact :** Appelle simulateImpact avec le terme choisi et direction='include'. L'interface affichera les AOs LOW qui seraient promus — ne dis rien avant l'appel. Attends la réponse.
 
 **Q3 — Reformulation :** Reformule la règle envisagée (boost du keyword X pour les AOs sur Y). Attends un oui/non explicite.
 
@@ -218,9 +264,8 @@ Même processus que le protocole d'exclusion. La correction sera de type keyword
 
 Si l'utilisateur demande explicitement de changer la priorité ("mets cet AO en HIGH") :
 1. Appelle manualOverride avec source_id, new_priority, reason, et created_by=<userId extrait de [user:...]>.
-2. Indique en 1 phrase ce qui va être fait.
-3. Indique que les boutons Confirmer / Annuler vont apparaître dans l'interface.
-4. N'appelle AUCUN autre tool après manualOverride.
+2. Dis EXACTEMENT : "Une carte de confirmation va apparaître — clique sur Confirmer pour appliquer le changement." Ne dis PAS "c'est fait", "ce sera fait", "c'est pris en compte" — le changement n'est PAS effectif avant la confirmation.
+3. N'appelle AUCUN autre tool après manualOverride.
 
 ## Règles absolues
 

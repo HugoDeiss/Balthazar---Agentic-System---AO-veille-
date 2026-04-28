@@ -75,6 +75,7 @@ export const getAODetails = createTool({
       id: z.string(),
       correction_type: z.string(),
       correction_value: z.string().nullable(),
+      reason: z.string().nullable(),
       created_by: z.string().nullable(),
       processed_at: z.string().nullable(),
     })),
@@ -94,7 +95,7 @@ export const getAODetails = createTool({
 
     const { data: feedbacks } = await supabase
       .from('ao_feedback')
-      .select('id, correction_type, correction_value, created_by, processed_at')
+      .select('id, correction_type, correction_value, reason, created_by, processed_at')
       .eq('source_id', source_id)
       .eq('status', 'applied')
       .order('processed_at', { ascending: false })
