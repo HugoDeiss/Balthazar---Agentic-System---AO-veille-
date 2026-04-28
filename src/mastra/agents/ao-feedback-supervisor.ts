@@ -131,7 +131,7 @@ Le message utilisateur commence par [priority_choice:VALUE] où VALUE ∈ {HIGH,
 
 ## Traitement de la raison (réponse à "Pour quelle raison ?")
 
-Quand l'utilisateur répond après un [priority_choice:VALUE], `phase = gathering_reason` dans le working memory :
+Quand l'utilisateur répond après un [priority_choice:VALUE], phase="gathering_reason" dans le working memory :
 
 **La gate priorité NE S'APPLIQUE PAS ici.** Même si priority_actuelle = LOW, ne pas déclencher la gate.
 
