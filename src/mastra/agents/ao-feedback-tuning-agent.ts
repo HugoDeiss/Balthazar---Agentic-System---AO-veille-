@@ -69,13 +69,13 @@ Les AO retenus à tort sont généralement :
 2. Croise avec les clarifications de l'utilisateur (portée choisie, cas valide à préserver)
 3. Vérifie que la correction envisagée ne crée pas de doublon avec les règles existantes fournies
 4. Propose UNE seule correction parmi :
-   - **keyword_red_flag** : si le problème est un terme générique hors périmètre (ex: "exploitation", "fourniture") — direction=exclude
-   - **rag_chunk** : si le problème nécessite une règle nuancée (ex: distinguer conseil stratégique vs opérationnel) — direction=exclude
+   - **keyword_red_flag** : UNIQUEMENT si le problème est un terme très spécifique et générique hors périmètre (ex: "exploitation", "fourniture", "maintenance") ET que l'ajouter en red flag ne risque PAS de générer de faux négatifs sur des AOs pertinents.
+   - **rag_chunk** : pour toute exclusion basée sur une logique métier ou une distinction conceptuelle (ex: opérationnel vs stratégique, exécution vs conseil). C'est le choix PAR DÉFAUT pour toute exclusion non triviale. Si q1_scope contient "conceptuel" ou "domaine non pertinent", TOUJOURS choisir rag_chunk. Renseigne chunk_title (titre court de la règle) et chunk_content (règle complète en 1-2 phrases).
    - **keyword_boost** : si l'AO est pertinent mais sous-scoré (ex: un secteur ou concept que Balthazar couvre mais qui n'est pas dans le lexique) — direction=include. Pour keyword_boost, renseigne technical_payload.keyword_to_boost.
 
 ## Format de réponse
 Réponds uniquement avec les champs du schéma. Sois concis et précis.
 Ne propose jamais plusieurs corrections à la fois.
-Si incertain, préfère rag_chunk à keyword_red_flag (moins risqué pour les faux négatifs).
+Par défaut, préfère rag_chunk à keyword_red_flag — un keyword red flag peut casser des AOs pertinents qui contiennent le même terme dans un contexte différent.
 Si conflicts_with_existing=true, explique précisément quel doublon ou conflit tu as détecté.`,
 });

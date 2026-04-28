@@ -820,6 +820,7 @@ Ne demande PAS de confirmation à l'utilisateur — c'est le superviseur qui gè
     simulation_summary: z.string(),
     correction_type: z.enum(['keyword_red_flag', 'rag_chunk', 'keyword_boost']),
     correction_value: z.string(),
+    affected_high_medium: z.array(z.object({ source_id: z.string(), title: z.string(), priority: z.string() })),
   }),
   execute: async ({ source_id, client_id, ao_context, user_reason, q1_scope, q2_valid_case, q3_confirmed_rule, direction, created_by }) => {
     // Step 1 — Check for duplicate rules
@@ -864,35 +865,39 @@ Propose une correction unique et ciblée. Pour direction=include, utilise correc
 
     // Step 3 — Determine the term to simulate (direction-aware to avoid exclusion term winning)
     const term = direction === 'include'
-      ? (proposal.technical_payload.keyword_to_boost ?? q3_confirmed_rule)
-      : (proposal.technical_payload.red_flag_to_add ?? proposal.technical_payload.chunk_title ?? q3_confirmed_rule);
+      ? (proposal.technical_payload.keyword_to_boost || q3_confirmed_rule)
+      : (proposal.technical_payload.red_flag_to_add || proposal.technical_payload.chunk_title || q3_confirmed_rule);
 
-    // Step 4 — Simulate impact
+    // Step 4 — Simulate impact (open AOs only: analyzed within 30 days, deadline not yet passed)
     const since = new Date();
     since.setDate(since.getDate() - 30);
+    const today = new Date().toISOString().split('T')[0];
 
     const { data: affectedAOs } = await supabase
       .from('appels_offres')
-      .select('source_id, title, priority')
+      .select('source_id, title, priority, deadline')
       .gte('analyzed_at', since.toISOString())
       .or(`title.ilike.%${term}%,description.ilike.%${term}%`);
 
-    const affected = affectedAOs ?? [];
+    // Keep only open AOs (deadline > today or no deadline)
+    const affected = (affectedAOs ?? []).filter(ao => !ao.deadline || ao.deadline >= today);
     let simulationSummary: string;
+    let affectedHighMedium: Array<{ source_id: string; title: string; priority: string }> = [];
 
     if (direction === 'include') {
       const wouldPromote = affected.filter(ao => ao.priority === 'LOW' || ao.priority === null);
       const alreadyPassing = affected.filter(ao => ao.priority === 'HIGH' || ao.priority === 'MEDIUM');
-      const simulationLines: string[] = [`${affected.length} AO(s) concerné(s) sur les 30 derniers jours.`];
+      const simulationLines: string[] = [`${affected.length} AO(s) ouverts concernés sur les 30 derniers jours.`];
       if (wouldPromote.length > 0) simulationLines.push(`🔼 ${wouldPromote.length} AO(s) LOW seraient promus.`);
       if (alreadyPassing.length > 0) simulationLines.push(`✅ ${alreadyPassing.length} déjà HIGH/MEDIUM — pas d'impact.`);
       simulationSummary = simulationLines.join(' ');
     } else {
       const correctlyExcluded = affected.filter(ao => ao.priority === 'LOW' || ao.priority === null);
       const potentiallyWrong = affected.filter(ao => ao.priority === 'HIGH' || ao.priority === 'MEDIUM');
-      const simulationLines: string[] = [`${affected.length} AO(s) affecté(s) sur les 30 derniers jours.`];
+      affectedHighMedium = potentiallyWrong.map(ao => ({ source_id: ao.source_id, title: ao.title, priority: ao.priority as string }));
+      const simulationLines: string[] = [`${affected.length} AO(s) ouverts affectés sur les 30 derniers jours.`];
       if (correctlyExcluded.length > 0) simulationLines.push(`✅ ${correctlyExcluded.length} correctement exclus (déjà LOW).`);
-      if (potentiallyWrong.length > 0) simulationLines.push(`⚠️ ${potentiallyWrong.length} à vérifier (HIGH/MEDIUM) : ${potentiallyWrong.map(a => `"${a.title}"`).join(', ')}.`);
+      if (potentiallyWrong.length > 0) simulationLines.push(`⚠️ ${potentiallyWrong.length} à reclasser (HIGH/MEDIUM encore ouverts).`);
       simulationSummary = simulationLines.join(' ');
     }
 
@@ -925,6 +930,7 @@ Propose une correction unique et ciblée. Pour direction=include, utilise correc
       simulation_summary: simulationSummary,
       correction_type: proposal.correction_type,
       correction_value: term,
+      affected_high_medium: affectedHighMedium,
     };
   },
 });
