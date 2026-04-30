@@ -16,7 +16,7 @@ import {
   proposeCorrection,
   applyCorrection,
   deactivateOverride,
-} from '../tools/feedback-tools';
+} from '../tools';
 
 export const aoCorrectionAgent = new Agent({
   id: 'ao-correction-agent',
