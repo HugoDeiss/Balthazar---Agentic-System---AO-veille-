@@ -2,6 +2,7 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { supabase } from './_shared/supabase';
 import { aoFeedbackTuningAgent, feedbackProposalSchema } from '../agents/ao-feedback-tuning-agent';
+import { buildRAGChunk } from './build-rag-chunk';
 
 export const executeCorrection = createTool({
   id: 'executeCorrection',
@@ -67,6 +68,36 @@ Propose une correction unique et ciblée. Pour direction=include, utilise correc
     // Enforce direction → correction_type mapping — tuning agent can hallucinate the wrong type
     if (direction === 'include') {
       proposal.correction_type = 'keyword_boost';
+    }
+
+    // Step 2b — If rag_chunk: generate high-quality structured chunk (dedicated step, always runs)
+    if (proposal.correction_type === 'rag_chunk') {
+      let aoTitle = '';
+      let aoDescription: string | undefined;
+      try {
+        const parsed = JSON.parse(ao_context);
+        aoTitle = parsed.title ?? '';
+        aoDescription = parsed.description ?? undefined;
+      } catch {
+        aoTitle = q3_confirmed_rule;
+      }
+
+      const ragChunkResult = await (buildRAGChunk.execute as Function)({
+        ao_title: aoTitle,
+        ao_description: aoDescription,
+        user_reason,
+        q1_scope,
+        q2_valid_case,
+        q3_confirmed_rule,
+        direction,
+        tuning_chunk_title: proposal.technical_payload.chunk_title,
+      });
+
+      if (ragChunkResult && 'chunk_content' in ragChunkResult) {
+        proposal.technical_payload.chunk_title = ragChunkResult.chunk_title;
+        proposal.technical_payload.chunk_content = ragChunkResult.chunk_content;
+        proposal.technical_payload.chunk_type = ragChunkResult.chunk_type;
+      }
     }
 
     // Step 3 — Determine the term to simulate (direction-aware)
