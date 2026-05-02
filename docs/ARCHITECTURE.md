@@ -90,6 +90,7 @@ Next.js /api/chat
 - `aoFeedbackSupervisor` charge le contexte via `getAODetails` + `searchRAGChunks`, explique le score, détecte l'intention
 - Si correction demandée → délègue à `aoCorrectionAgent` (3 questions + simulation + application)
 - `aoCorrectionAgent` délègue le diagnostic structuré à `aoFeedbackTuningAgent` → `FeedbackProposal`
+- Si `correction_type=rag_chunk` : `executeCorrection` appelle `buildRAGChunk` (step S2b) → chunk structuré 150-300 mots au standard corpus (template + few-shot)
 - Le stream est retransmis tel quel au navigateur
 
 ### 2. Feedback (`/api/feedback`)
@@ -185,22 +186,48 @@ FEEDBACK_SECRET=                 # même clé HMAC que le backend
 src/
 ├── mastra/
 │   ├── index.ts                          # instance Mastra, agents, workflows
+│   ├── feedback-routes.ts                # handlers HTTP feedback (form/submit/confirm)
 │   ├── agents/
 │   │   ├── boamp-semantic-analyzer.ts    # agent qualification AO (GPT-4o + RAG)
-│   │   ├── ao-feedback-supervisor.ts     # lean router : chargement contexte + intent routing
+│   │   ├── ao-feedback-supervisor/       # lean router : chargement contexte + intent routing
+│   │   │   ├── index.ts                  # définition agent (Memory, tools, model)
+│   │   │   └── instructions.ts           # system prompt complet
+│   │   ├── ao-feedback-agent/            # agent feedback (subagent)
+│   │   │   ├── index.ts
+│   │   │   └── instructions.ts
 │   │   ├── ao-correction-agent.ts        # protocole correction : 3 questions + simulation + apply
 │   │   ├── ao-feedback-tuning-agent.ts   # subagent diagnostic structuré (FeedbackProposal)
+│   │   ├── ao-reason-classifier.ts       # classifieur de raison (schéma Zod + agent)
 │   │   └── index.ts                      # re-exports agents
 │   ├── tools/
-│   │   ├── feedback-tools.ts             # 8 tools : getAODetails, searchSimilarKeywords,
-│   │   │                                 #   searchRAGChunks, simulateImpact, proposeCorrection,
-│   │   │                                 #   applyCorrection, deactivateOverride, listActiveOverrides
-│   │   └── balthazar-rag-tools.ts        # RAG tools (embed, vectorStore)
+│   │   ├── _shared/supabase.ts           # client Supabase partagé
+│   │   ├── get-ao-details.ts             # getAODetails
+│   │   ├── search-similar-keywords.ts    # searchSimilarKeywords
+│   │   ├── search-rag-chunks.ts          # searchRAGChunks
+│   │   ├── propose-choices.ts            # proposeChoices (+ termExtractorAgent local)
+│   │   ├── propose-correction.ts         # proposeCorrection
+│   │   ├── simulate-impact.ts            # simulateImpact
+│   │   ├── apply-correction.ts           # applyCorrection
+│   │   ├── deactivate-override.ts        # deactivateOverride
+│   │   ├── list-active-overrides.ts      # listActiveOverrides
+│   │   ├── get-keyword-category.ts       # getKeywordCategory
+│   │   ├── execute-correction.ts         # executeCorrection
+│   │   ├── manual-override.ts            # manualOverride
+│   │   ├── propose-priority-choice.ts    # proposePriorityChoice
+│   │   ├── check-duplicate-correction.ts # checkDuplicateCorrection
+│   │   ├── deactivate-rag-chunk.ts       # deactivateRAGChunk
+│   │   ├── query-impact-history.ts       # queryImpactHistory
+│   │   ├── get-ao-correction-history.ts  # getAOCorrectionHistory — historique unifié par AO
+│   │   ├── revert-manual-override.ts     # revertManualOverride — annule manual_priority
+│   │   ├── build-rag-chunk.ts            # buildRAGChunk — génère chunk structuré corpus-quality
+│   │   ├── index.ts                      # barrel — re-exports tous les tools
+│   │   ├── balthazar-rag-tools.ts        # RAG tools (embed, vectorStore, singleton)
+│   │   ├── boamp-fetcher.ts              # BOAMP API fetcher
+│   │   └── marchesonline-rss-fetcher.ts  # MarchesOnline RSS fetcher
 │   ├── workflows/
-│   │   ├── ao-veille.ts                  # pipeline principal (~2500 lignes)
+│   │   ├── ao-veille.ts                  # pipeline principal
 │   │   └── feedback-workflow.ts          # HITL feedback (suspend/resume)
-│   ├── inngest/index.ts                  # cron Inngest (ao-veille-daily + feedback-processor)
-│   └── server/feedback-handlers.ts       # handlers HTTP feedback (form/submit/confirm)
+│   └── inngest/index.ts                  # cron Inngest (ao-veille-daily + feedback-processor)
 ├── utils/
 │   ├── balthazar-keywords.ts             # moteur de scoring keywords
 │   ├── human-readable-reason.ts          # construit la raison lisible de décision
@@ -225,11 +252,16 @@ app/
     ├── aos/route.ts                      # GET liste AOs (filtres + pagination)
     ├── aos/[sourceId]/route.ts           # GET détail AO
     ├── chat/route.ts                     # POST stream → aoFeedbackSupervisor
-    └── feedback/route.ts                 # POST HMAC + forward → Mastra
+    ├── feedback/route.ts                 # POST HMAC + forward → Mastra
+    ├── priority/route.ts                 # POST applique manual_priority + human_readable_reason
+    ├── corrections/apply/route.ts        # POST applique une correction RAG/keyword via Mastra
+    ├── corrections/revert/route.ts       # POST annule une correction (dispatch par type)
+    └── aos/[sourceId]/corrections/route.ts # GET historique corrections d'un AO
 components/
-├── AOWorkspace.tsx                       # coordinateur 3 panneaux
+├── AOWorkspace.tsx                       # coordinateur 3 panneaux + refreshKey state
 ├── AOListPanel.tsx                       # liste + filtres (date, priorité)
-├── AODetailPanel.tsx                     # détail AO, scores, keywords
+├── AODetailPanel.tsx                     # détail AO, scores, keywords, correctionRefreshKey
+├── CorrectionHistoryTimeline.tsx         # timeline accordéon + modal revert
 └── AOAgentPanel.tsx                      # chat IA (useChat + feedback banner)
 lib/
 ├── supabase.ts                           # getServerSupabase() + interface AO
