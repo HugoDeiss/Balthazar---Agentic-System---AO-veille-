@@ -28,3 +28,5 @@ export { proposePriorityChoice } from "./propose-priority-choice";
 export { checkDuplicateCorrection } from "./check-duplicate-correction";
 export { deactivateRAGChunk } from "./deactivate-rag-chunk";
 export { queryImpactHistory } from "./query-impact-history";
+export { getAOCorrectionHistory } from "./get-ao-correction-history";
+export { revertManualOverride } from "./revert-manual-override";

@@ -50,7 +50,7 @@ describe('checkDuplicateCorrection', () => {
         }),
       });
 
-      const result = await checkDuplicateCorrection.execute({
+      const result = await (checkDuplicateCorrection.execute as any)({
         client_id: 'balthazar',
         correction_type: 'keyword_red_flag',
         value: 'transport scolaire',
@@ -72,7 +72,7 @@ describe('checkDuplicateCorrection', () => {
         }),
       });
 
-      const result = await checkDuplicateCorrection.execute({
+      const result = await (checkDuplicateCorrection.execute as any)({
         client_id: 'balthazar',
         correction_type: 'keyword_red_flag',
         value: 'domaine inconnu',
@@ -102,7 +102,7 @@ describe('checkDuplicateCorrection', () => {
         }),
       });
 
-      const result = await checkDuplicateCorrection.execute({
+      const result = await (checkDuplicateCorrection.execute as any)({
         client_id: 'balthazar',
         correction_type: 'rag_chunk',
         value: 'conseil PME directif',  // contient 'conseil pme' → isDuplicate=true
@@ -124,7 +124,7 @@ describe('checkDuplicateCorrection', () => {
         }),
       });
 
-      const result = await checkDuplicateCorrection.execute({
+      const result = await (checkDuplicateCorrection.execute as any)({
         client_id: 'balthazar',
         correction_type: 'rag_chunk',
         value: 'nouvelle règle inexistante',

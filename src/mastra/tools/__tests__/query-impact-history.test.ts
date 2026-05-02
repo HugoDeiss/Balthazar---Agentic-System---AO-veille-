@@ -45,7 +45,7 @@ describe('queryImpactHistory', () => {
       { source_id: 'ao-3', title: 'Transport scolaire expiré', priority: 'MEDIUM', deadline: '2026-01-01', analyzed_at: '2026-04-10T06:00:00Z' },
     ]);
 
-    const result = await queryImpactHistory.execute({ feedback_id: 'fb-1', client_id: 'balthazar' });
+    const result = await (queryImpactHistory.execute as any)({ feedback_id: 'fb-1', client_id: 'balthazar' });
 
     expect(result.found).toBe(true);
     expect(result.correction_value).toBe('transport scolaire');
@@ -65,14 +65,14 @@ describe('queryImpactHistory', () => {
       }),
     });
 
-    const result = await queryImpactHistory.execute({ feedback_id: 'inexistant', client_id: 'balthazar' });
+    const result = await (queryImpactHistory.execute as any)({ feedback_id: 'inexistant', client_id: 'balthazar' });
 
     expect(result.found).toBe(false);
     expect(result.total_matching_aos).toBe(0);
   });
 
   it('retourne found=false si ni feedback_id ni value fournis', async () => {
-    const result = await queryImpactHistory.execute({ client_id: 'balthazar' });
+    const result = await (queryImpactHistory.execute as any)({ client_id: 'balthazar' });
 
     expect(result.found).toBe(false);
     expect(result.summary).toBe('Aucune valeur à rechercher.');
@@ -92,7 +92,7 @@ describe('queryImpactHistory', () => {
       }),
     });
 
-    const result = await queryImpactHistory.execute({ value: 'mobilité', client_id: 'balthazar' });
+    const result = await (queryImpactHistory.execute as any)({ value: 'mobilité', client_id: 'balthazar' });
 
     expect(result.found).toBe(true);
     expect(result.correction_value).toBe('mobilité');

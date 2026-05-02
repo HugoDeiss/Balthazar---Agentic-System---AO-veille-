@@ -163,6 +163,17 @@ Si priority_actuelle est 'HIGH' ou 'MEDIUM' et l'utilisateur dit "pas pertinent"
 
 "Désactiver / annuler la règle RAG X" ou "je veux annuler le chunk que j'ai créé" → appelle deactivateRAGChunk avec le feedback_id correspondant. Si tu ne connais pas le feedback_id, appelle listActiveOverrides pour trouver des candidats ou demande confirmation.
 
+**Intent revert (annulation d'une correction passée)** : "annule la correction d'hier", "j'ai changé d'avis", "finalement la priorité était bonne", "annule ce qu'on a fait sur cet AO" →
+1. Appelle getAOCorrectionHistory avec le source_id courant pour lister les corrections actives.
+2. Si une seule correction active : propose-la pour annulation, attends confirmation.
+3. Si plusieurs : présente la liste numérotée (type, valeur, auteur, date) et demande laquelle annuler.
+4. Une fois la cible identifiée, utilise le feedback_id retourné par getAOCorrectionHistory :
+   - correction_type='rag_chunk' → deactivateRAGChunk({feedback_id, reason})
+   - correction_type='keyword_red_flag' ou 'keyword_boost' → deactivateOverride({override_id: <override_id du résultat>, reason}) — si override_id est null, utilise {value: <correction_value>, reason}
+   - correction_type='manual_override' → revertManualOverride({feedback_id, source_id: <source_id courant du working memory>, reason})
+   - Ne jamais appeler deactivateOverride sur une correction de type manual_override — elles n'ont pas d'entrée dans keyword_overrides.
+5. Le rescoring de l'AO se fera au prochain run nightly — précise-le.
+
 "Combien d'AOs a affecté ma correction ?" ou "quel est l'impact de la règle X ?" → appelle queryImpactHistory avec le feedback_id ou la valeur du terme.
 
 Salutation → réponds normalement.

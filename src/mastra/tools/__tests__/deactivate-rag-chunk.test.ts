@@ -55,7 +55,7 @@ describe('deactivateRAGChunk', () => {
         }),
       });
 
-    const result = await deactivateRAGChunk.execute({ feedback_id: 'fb-1', reason: 'règle trop large' });
+    const result = await (deactivateRAGChunk.execute as any)({ feedback_id: 'fb-1', reason: 'règle trop large' });
 
     expect(result.deactivated).toBe(true);
     expect(result.message).toContain('conseil stratégique');
@@ -71,7 +71,7 @@ describe('deactivateRAGChunk', () => {
       }),
     });
 
-    const result = await deactivateRAGChunk.execute({ feedback_id: 'inexistant', reason: 'test' });
+    const result = await (deactivateRAGChunk.execute as any)({ feedback_id: 'inexistant', reason: 'test' });
 
     expect(result.deactivated).toBe(false);
     expect(result.message).toBe('Feedback introuvable.');
@@ -89,7 +89,7 @@ describe('deactivateRAGChunk', () => {
       }),
     });
 
-    const result = await deactivateRAGChunk.execute({ feedback_id: 'fb-2', reason: 'test' });
+    const result = await (deactivateRAGChunk.execute as any)({ feedback_id: 'fb-2', reason: 'test' });
 
     expect(result.deactivated).toBe(false);
     expect(result.message).toContain('deactivateOverride');
@@ -107,7 +107,7 @@ describe('deactivateRAGChunk', () => {
       }),
     });
 
-    const result = await deactivateRAGChunk.execute({ feedback_id: 'fb-3', reason: 'test' });
+    const result = await (deactivateRAGChunk.execute as any)({ feedback_id: 'fb-3', reason: 'test' });
 
     expect(result.deactivated).toBe(false);
     expect(result.message).toContain('agent_proposed');
@@ -134,7 +134,7 @@ describe('deactivateRAGChunk', () => {
         }),
       });
 
-    const result = await deactivateRAGChunk.execute({ feedback_id: 'fb-4', reason: 'nettoyage' });
+    const result = await (deactivateRAGChunk.execute as any)({ feedback_id: 'fb-4', reason: 'nettoyage' });
 
     // Doit quand même marquer le statut en DB
     expect(result.deactivated).toBe(true);
