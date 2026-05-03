@@ -107,15 +107,17 @@ L'app Next.js est un dashboard 3 panneaux pour consulter et qualifier les AOs :
 
 - **Gauche** — Liste des AOs avec filtres (priorité, période, pagination)
 - **Centre** — Détail AO : scores, keywords détectés, raison de décision
-- **Droite** — Chat avec `aoFeedbackAgent` (auto-déclenché à l'ouverture)
+- **Droite** — Chat avec `aoFeedbackSupervisor` (auto-déclenché à l'ouverture)
 
 ### Connexions vers ce backend
 
 | Route Next.js | Cible Mastra |
 |---------------|-------------|
-| `POST /api/chat` | `MASTRA_URL/api/agents/aoFeedbackAgent/stream` |
+| `POST /api/chat` | `MASTRA_URL/api/agents/aoFeedbackSupervisor/stream` |
 | `POST /api/feedback` | `MASTRA_URL/api/feedback/submit` (HMAC-SHA256) |
 | `GET /api/aos*` | Supabase direct (service key) |
+| `POST /api/priority` | Supabase direct — applique `manual_priority` + `human_readable_reason` |
+| `POST /api/corrections/apply` | Mastra `apply-correction` tool — applique une correction RAG/keyword |
 
 Voir **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** pour le détail des flux et variables d'environnement.
 
@@ -683,17 +685,8 @@ Les AO analysés sont sauvegardés dans `appels_offres` avec :
 ## 🧪 Tests et évaluations
 
 ```bash
-# Tests unitaires (rectificatifs)
-npm run test:rectificatif
-
-# Tests filtrage
-npm run test:filter:all
-
-# Tests retry
-npm run test:retry:all
-
-# Test workflow complet
-ts-node scripts/test-workflow-trigger.sh
+# Tests unitaires (vitest)
+npm test
 
 # Évaluations RAG (pack synthétique 30 cas)
 DATABASE_URL=... npx tsx evals/balthazar-scope-pack.ts

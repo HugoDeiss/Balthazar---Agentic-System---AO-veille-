@@ -210,10 +210,28 @@ Dans Cursor, le serveur MCP est configuré pour lancer :
 | Fichier | Rôle | Statut |
 |---------|------|--------|
 | `src/mastra/index.ts` | Enregistrement `mastra` : agents + workflows ; `apiRoutes`. | ✅ Mis à jour |
-| `src/mastra/agents/ao-feedback-supervisor.ts` | Lean router — chargement contexte, explication score, intent routing. 3 tools, 1 subagent. | ✅ Refactorisé |
+| `src/mastra/agents/ao-feedback-supervisor/` | Lean router — chargement contexte, explication score, intent routing. 3 tools, 1 subagent. `index.ts` + `instructions.ts`. | ✅ Refactorisé (subdir) |
+| `src/mastra/agents/ao-feedback-agent/` | Agent feedback (subagent). `index.ts` + `instructions.ts`. | ✅ Refactorisé (subdir) |
 | `src/mastra/agents/ao-correction-agent.ts` | Protocole correction — 3 questions, délégation diagnostic, simulation impact, apply. 5 tools, 1 subagent. | ✅ Créé |
 | `src/mastra/agents/ao-feedback-tuning-agent.ts` | Subagent diagnostic — reçoit contexte structuré, retourne `FeedbackProposal`. Aucun tool. | ✅ Inchangé |
-| `src/mastra/tools/feedback-tools.ts` | 8 tools feedback : getAODetails, searchSimilarKeywords, searchRAGChunks, simulateImpact, proposeCorrection, applyCorrection, deactivateOverride, listActiveOverrides. | ✅ Inchangé |
+| `src/mastra/tools/index.ts` | Barrel — re-exports 16 tools feedback + RAG tools. | ✅ Créé |
+| `src/mastra/tools/_shared/supabase.ts` | Client Supabase partagé par tous les tools. | ✅ Créé |
+| `src/mastra/tools/get-ao-details.ts` | `getAODetails` | ✅ Extrait |
+| `src/mastra/tools/search-similar-keywords.ts` | `searchSimilarKeywords` | ✅ Extrait |
+| `src/mastra/tools/search-rag-chunks.ts` | `searchRAGChunks` | ✅ Extrait |
+| `src/mastra/tools/propose-choices.ts` | `proposeChoices` (+ `termExtractorAgent` local) | ✅ Extrait |
+| `src/mastra/tools/propose-correction.ts` | `proposeCorrection` | ✅ Extrait |
+| `src/mastra/tools/simulate-impact.ts` | `simulateImpact` | ✅ Extrait |
+| `src/mastra/tools/apply-correction.ts` | `applyCorrection` | ✅ Extrait |
+| `src/mastra/tools/deactivate-override.ts` | `deactivateOverride` | ✅ Extrait |
+| `src/mastra/tools/list-active-overrides.ts` | `listActiveOverrides` | ✅ Extrait |
+| `src/mastra/tools/get-keyword-category.ts` | `getKeywordCategory` | ✅ Extrait |
+| `src/mastra/tools/execute-correction.ts` | `executeCorrection` | ✅ Extrait |
+| `src/mastra/tools/manual-override.ts` | `manualOverride` | ✅ Extrait |
+| `src/mastra/tools/propose-priority-choice.ts` | `proposePriorityChoice` | ✅ Extrait |
+| `src/mastra/tools/check-duplicate-correction.ts` | `checkDuplicateCorrection` | ✅ Extrait |
+| `src/mastra/tools/deactivate-rag-chunk.ts` | `deactivateRAGChunk` | ✅ Extrait |
+| `src/mastra/tools/query-impact-history.ts` | `queryImpactHistory` | ✅ Extrait |
 | `src/mastra/workflows/ao-veille.ts` | Pipeline veille, `processOneAOWorkflow`, `analyzeAOCompleteWorkflow`, keywords, scoring. | — |
 | `src/mastra/agents/boamp-semantic-analyzer.ts` | Agent sémantique RAG actuel (référence pour traces à persister). | — |
 | `src/mastra/tools/balthazar-rag-tools.ts` | Outils RAG existants — embed, vectorStore, singleton. | — |
