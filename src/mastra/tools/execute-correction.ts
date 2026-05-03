@@ -20,6 +20,7 @@ Ne demande PAS de confirmation à l'utilisateur — c'est le superviseur qui gè
     q3_confirmed_rule: z.string().describe('Réponse Q3 — reformulation confirmée de la règle'),
     direction: z.enum(['exclude', 'include']).default('exclude').describe("'exclude' pour faux positif, 'include' pour faux négatif"),
     created_by: z.string().optional().describe("Identité du consultant courant (pablo/alexandre)"),
+    correction_type: z.enum(['keyword_red_flag', 'rag_chunk', 'keyword_boost']).optional().describe("Force le type de correction (Cas B — terme précis). Si fourni, bypass la décision du tuning agent."),
   }),
   outputSchema: z.object({
     feedback_id: z.string(),
@@ -29,7 +30,7 @@ Ne demande PAS de confirmation à l'utilisateur — c'est le superviseur qui gè
     correction_value: z.string(),
     affected_high_medium: z.array(z.object({ source_id: z.string(), title: z.string(), priority: z.string() })),
   }),
-  execute: async ({ source_id, client_id, ao_context, user_reason, q1_scope, q2_valid_case, q3_confirmed_rule, direction, created_by }) => {
+  execute: async ({ source_id, client_id, ao_context, user_reason, q1_scope, q2_valid_case, q3_confirmed_rule, direction, created_by, correction_type: forcedCorrectionType }) => {
     // Step 1 — Check for duplicate rules
     const { data: existingOverrides } = await supabase
       .from('keyword_overrides')
@@ -65,8 +66,10 @@ Propose une correction unique et ciblée. Pour direction=include, utilise correc
 
     const proposal = diagnosisResult.object;
 
-    // Enforce direction → correction_type mapping — tuning agent can hallucinate the wrong type
-    if (direction === 'include') {
+    // Enforce correction_type — explicit override (Cas B) takes priority, then direction mapping
+    if (forcedCorrectionType) {
+      proposal.correction_type = forcedCorrectionType;
+    } else if (direction === 'include') {
       proposal.correction_type = 'keyword_boost';
     }
 

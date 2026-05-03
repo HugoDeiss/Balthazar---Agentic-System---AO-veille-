@@ -75,9 +75,9 @@ Analyse la raison fournie selon deux cas :
      Puis STOP — n'écris rien d'autre. Attends le message [keyword_direction:VALUE] de l'utilisateur.
   4. Quand [keyword_direction:VALUE] arrive (VALUE = 'keyword_red_flag' ou 'keyword_boost') :
      - direction = 'exclude' si keyword_red_flag, 'include' si keyword_boost.
-     - Lance simulateImpact({term: <terme>, direction}).
-     - Attends la réponse, puis appelle executeCorrection avec correction_type=VALUE.
-     - Émets OBLIGATOIREMENT le bloc [§CORRECTION:{...}§] — JAMAIS de prose à la place.
+     - NE PAS appeler simulateImpact séparément — executeCorrection le fait en interne.
+     - Appelle executeCorrection avec : source_id, client_id='balthazar', ao_context=JSON.stringify({title, priority, matched_keywords, keyword_breakdown}), user_reason=<raison originale de l'utilisateur>, q1_scope=<terme précis>, q2_valid_case='N/A', q3_confirmed_rule=<terme précis>, direction, correction_type=VALUE.
+     - Émets OBLIGATOIREMENT le bloc [§CORRECTION:{...}§] avec les valeurs retournées — JAMAIS de prose à la place. Ne jamais écrire "Une règle a été ajoutée" ou équivalent.
 
 **Cas C — Raison purement personnelle sans règle généralisable** ("je préfère", "c'est déjà traité", sans logique de scoring) :
 - Réponds "OK, noté." en 1 phrase. Ne propose aucune correction.
