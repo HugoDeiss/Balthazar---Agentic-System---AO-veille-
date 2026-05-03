@@ -31,3 +31,4 @@ export { queryImpactHistory } from "./query-impact-history";
 export { getAOCorrectionHistory } from "./get-ao-correction-history";
 export { revertManualOverride } from "./revert-manual-override";
 export { buildRAGChunk } from "./build-rag-chunk";
+export { proposeKeywordDirection } from "./propose-keyword-direction";

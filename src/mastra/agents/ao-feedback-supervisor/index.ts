@@ -18,6 +18,7 @@ import {
   queryImpactHistory,
   getAOCorrectionHistory,
   revertManualOverride,
+  proposeKeywordDirection,
 } from '../../tools';
 import { supervisorInstructions } from './instructions';
 
@@ -73,7 +74,7 @@ export const aoFeedbackSupervisor = new Agent({
   name: 'ao-feedback-supervisor',
   model: openai('gpt-4o-mini'),
   memory,
-  tools: { getAODetails, searchRAGChunks, listActiveOverrides, getKeywordCategory, executeCorrection, deactivateOverride, proposeChoices, simulateImpact, manualOverride, proposePriorityChoice, checkDuplicateCorrection, deactivateRAGChunk, queryImpactHistory, getAOCorrectionHistory, revertManualOverride },
+  tools: { getAODetails, searchRAGChunks, listActiveOverrides, getKeywordCategory, executeCorrection, deactivateOverride, proposeChoices, simulateImpact, manualOverride, proposePriorityChoice, checkDuplicateCorrection, deactivateRAGChunk, queryImpactHistory, getAOCorrectionHistory, revertManualOverride, proposeKeywordDirection },
   defaultStreamOptionsLegacy: { maxSteps: 20 },
   defaultGenerateOptionsLegacy: { maxSteps: 20 },
   instructions: supervisorInstructions,
